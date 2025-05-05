@@ -27,6 +27,8 @@ ACelestialBodyBase::ACelestialBodyBase()
     InfluenceSphereComponent->SetupAttachment(SceneRoot);
     InfluenceSphereComponent->SetCollisionProfileName(FName("OverlapAllDynamic")); // Only overlap Pawns potentially
     InfluenceSphereComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	InfluenceSphereComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+	InfluenceSphereComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
     InfluenceSphereComponent->bHiddenInGame = false; // Set to true later for release
 
     // Bind overlap events

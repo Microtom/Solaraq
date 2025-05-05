@@ -10,6 +10,7 @@
 #include "Components/DockingPadComponent.h" // Includes EDockingStatus
 #include "SolaraqShipBase.generated.h" // Must be last include
 
+class ASolaraqProjectile;
 // Forward declarations (best practice)
 class UStaticMeshComponent;
 class USpringArmComponent;
@@ -137,7 +138,7 @@ public:
 protected: // Keep protected or make EditDefaultsOnly
 	/** The Blueprint class of the projectile this ship fires. Assign BP_Bullet (or similar) in derived Blueprint Defaults. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Weapon")
-	TSubclassOf<AActor> ProjectileClass;
+	TSubclassOf<ASolaraqProjectile> ProjectileClass;
 
 	/** The base speed imparted to the projectile relative to the muzzle direction. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Solaraq|Weapon", meta = (ClampMin = "0.0", ForceUnits = "cm/s"))

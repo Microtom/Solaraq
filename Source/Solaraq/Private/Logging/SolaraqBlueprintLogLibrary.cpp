@@ -61,9 +61,12 @@ void USolaraqBlueprintLogLibrary::LogToSolaraqChannel(
         case ESolaraqLogCategory::UI:
             LogCategoryName = LogSolaraqUI.GetCategoryName();
             break;
-    case ESolaraqLogCategory::Celestials:
-        LogCategoryName = LogSolaraqCelestials.GetCategoryName();
-        break;
+        case ESolaraqLogCategory::Celestials:
+            LogCategoryName = LogSolaraqCelestials.GetCategoryName();
+            break;
+        case ESolaraqLogCategory::Projectile:
+            LogCategoryName = LogSolaraqCelestials.GetCategoryName();
+            break;
         // Add cases for new categories here
         default:
             // Fallback to General if an invalid enum value is somehow passed

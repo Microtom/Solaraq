@@ -15,6 +15,7 @@
 #include "GameFramework/PlayerController.h" // Needed for IsLocalController() potentially later
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Projectiles/SolaraqProjectile.h"
 
 // Simple Logging Helper Macro
 #define NET_LOG(LogCat, Verbosity, Format, ...) \
@@ -789,7 +790,7 @@ void ASolaraqShipBase::PerformFireWeapon()
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
     // --- Spawn the Projectile ---
-    AActor* SpawnedProjectile = World->SpawnActor<AActor>(ProjectileClass, MuzzleLocation, MuzzleRotation, SpawnParams);
+    AActor* SpawnedProjectile = World->SpawnActor<ASolaraqProjectile>(ProjectileClass, MuzzleLocation, MuzzleRotation, SpawnParams);
 
     // --- Set Velocity & Cooldown ---
     if (SpawnedProjectile)
@@ -800,21 +801,21 @@ void ASolaraqShipBase::PerformFireWeapon()
         {
             ProjMoveComp->Velocity = FinalVelocity; // Set the calculated velocity
             ProjMoveComp->UpdateComponentVelocity(); // Ensure component registers the change immediately
-            UE_LOG(LogSolaraqCombat, Verbose, TEXT("%s PerformFireWeapon: Spawned %s, Set Velocity to %s"),
+            UE_LOG(LogSolaraqProjectile, Warning, TEXT("%s PerformFireWeapon: Spawned %s, Set Velocity to %s"),
                 *GetName(), *SpawnedProjectile->GetName(), *FinalVelocity.ToString());
 
             LastFireTime = CurrentTime; // Reset cooldown ONLY if spawn and velocity set were successful
         }
         else
         {
-            UE_LOG(LogSolaraqCombat, Error, TEXT("%s PerformFireWeapon: Spawned %s but it has NO ProjectileMovementComponent! Cannot set velocity."),
+            UE_LOG(LogSolaraqProjectile, Warning, TEXT("%s PerformFireWeapon: Spawned %s but it has NO ProjectileMovementComponent! Cannot set velocity."),
                 *GetName(), *SpawnedProjectile->GetName());
             // SpawnedProjectile->Destroy(); // Optionally destroy the invalid projectile
         }
     }
     else
     {
-         UE_LOG(LogSolaraqCombat, Error, TEXT("%s PerformFireWeapon: World->SpawnActor failed for %s!"), *GetName(), *ProjectileClass->GetName());
+         UE_LOG(LogSolaraqProjectile, Error, TEXT("%s PerformFireWeapon: World->SpawnActor failed for %s!"), *GetName(), *ProjectileClass->GetName());
     }
 }
 

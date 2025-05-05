@@ -10,3 +10,4 @@ DEFINE_LOG_CATEGORY(LogSolaraqSystem);
 DEFINE_LOG_CATEGORY(LogSolaraqAI);
 DEFINE_LOG_CATEGORY(LogSolaraqUI);
 DEFINE_LOG_CATEGORY(LogSolaraqCelestials);
+DEFINE_LOG_CATEGORY(LogSolaraqProjectile);
