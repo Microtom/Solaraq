@@ -8,7 +8,7 @@
 ASolaraqEnemyShip::ASolaraqEnemyShip()
 {
     // Constructor code if needed (e.g., setting default values different from base)
-    UE_LOG(LogSolaraqGeneral, Verbose, TEXT("ASolaraqEnemyShip %s Constructed"), *GetName());
+    //UE_LOG(LogSolaraqAI, Warning, TEXT("ASolaraqEnemyShip %s Constructed"), *GetName());
      FireRate = FMath::RandRange(0.4f, 0.8f); // Example: Randomize fire rate slightly per instance
 }
 
@@ -38,7 +38,7 @@ void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation)
     FRotator TargetRotation = DirectionToTarget.Rotation();
     FRotator CurrentRotation = CollisionAndPhysicsRoot->GetComponentRotation(); // Use physics rotation
 
-    // UE_LOG(LogSolaraqAI, Verbose, TEXT("TurnTowards --- CurrentRot(Physics): %s, TargetRot(World): %s"), *CurrentRotation.ToString(), *TargetRotation.ToString()); // Optional Log
+    //UE_LOG(LogSolaraqAI, Warning, TEXT("TurnTowards --- CurrentRot(Physics): %s, TargetRot(World): %s"), *CurrentRotation.ToString(), *TargetRotation.ToString()); // Optional Log
 
     float CurrentYaw = CurrentRotation.Yaw;
     float TargetYaw = TargetRotation.Yaw;
@@ -54,17 +54,17 @@ void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation)
         {
             // Apply damping faster when close to target
             CollisionAndPhysicsRoot->SetPhysicsAngularVelocityInDegrees(FVector(CurrentAngularVel.X, CurrentAngularVel.Y, CurrentAngularVel.Z * 0.5f));
-            UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f). Applying damping to AngVelZ: %.2f"), *GetName(), YawDifference, CurrentAngularVel.Z * 0.5f);
+            //UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f). Applying damping to AngVelZ: %.2f"), *GetName(), YawDifference, CurrentAngularVel.Z * 0.5f);
         }
         else {
-             UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f) and AngVelZ low. No torque/damping."), *GetName(), YawDifference);
+             //UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f) and AngVelZ low. No torque/damping."), *GetName(), YawDifference);
         }
         return; // Don't apply positive torque if already aligned
     }
 
     // --- Torque Calculation ---
     // Start with the MaxTurnTorque value that was previously causing overshoot
-    float MaxTurnTorque = 10000.0f; // <<< YOUR PREVIOUSLY TUNED VALUE (The one that was too fast)
+    float MaxTurnTorque = 3000.0f; // <<< YOUR PREVIOUSLY TUNED VALUE (The one that was too fast)
     float TurnDirection = FMath::Sign(YawDifference);
 
     // --- Proportional Torque Calculation ---
@@ -72,7 +72,7 @@ void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation)
     // Start larger (e.g., 90) and decrease if it still overshoots.
     float SlowdownAngle = 90.0f; // <<< TUNABLE (Try 180, 90, 60, 45, 30...)
     // Minimum factor prevents zero torque when far from target. Tune if needed (0.05 - 0.2 range usually ok)
-    float MinTorqueFactor = 0.1f; // <<< TUNABLE
+    float MinTorqueFactor = 0.5f; // <<< TUNABLE
 
     // Calculate scaling factor: 1.0 when angle diff >= SlowdownAngle, decreasing linearly to MinTorqueFactor.
     float TorqueFactor = FMath::Clamp(FMath::Abs(YawDifference) / SlowdownAngle, MinTorqueFactor, 1.0f);
@@ -83,7 +83,7 @@ void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation)
     // Keep AccelChange=true for now unless you have specific reasons to use mass
     CollisionAndPhysicsRoot->AddTorqueInDegrees(TorqueToApply, NAME_None, true);
 
-    UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: YawDiff: %.2f, Factor: %.2f, Applying Torque: %.2f"), *GetName(), YawDifference, TorqueFactor, TorqueToApply.Z);
+    //UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: YawDiff: %.2f, Factor: %.2f, Applying Torque: %.2f"), *GetName(), YawDifference, TorqueFactor, TorqueToApply.Z);
 }
 
 void ASolaraqEnemyShip::FireWeapon()
@@ -92,57 +92,7 @@ void ASolaraqEnemyShip::FireWeapon()
     if (!HasAuthority()) return;
     if (IsDead()) return;
 
-    // --- Check Cooldown ---
-    const float CurrentTime = GetWorld()->GetTimeSeconds();
-    if (CurrentTime < LastFireTime + FireRate)
-    {
-        // UE_LOG(LogSolaraqAI, VeryVerbose, TEXT("%s FireWeapon: Cooldown Active (%.2f / %.2f)"), *GetName(), CurrentTime - LastFireTime, FireRate);
-        return; // Still on cooldown
-    }
-
-    // --- Check if Projectile Class is Assigned ---
-    if (!ProjectileClass)
-    {
-        UE_LOG(LogSolaraqCombat, Error, TEXT("%s FireWeapon: ProjectileClass is NULL! Assign 'BP_Bullet' in the Enemy Ship Blueprint defaults."), *GetName());
-        return; // Cannot fire without a projectile type
-    }
-
-    // --- Get World ---
-    UWorld* const World = GetWorld();
-    if (!World)
-    {
-         UE_LOG(LogSolaraqCombat, Error, TEXT("%s FireWeapon: GetWorld() returned NULL!"), *GetName());
-         return; // Cannot spawn without a world context
-    }
-
-    // --- Calculate Spawn Transform ---
-    const FVector ForwardVector = GetActorForwardVector();
-    const FVector SpawnLocation = GetActorLocation() + (ForwardVector * MuzzleOffset); // Use MuzzleOffset property
-    const FRotator SpawnRotation = ForwardVector.Rotation(); // Projectile usually faces ship's forward direction
-
-    UE_LOG(LogSolaraqCombat, Warning, TEXT("%s FireWeapon: Attempting to spawn %s at %s | %s"),
-        *GetName(), *ProjectileClass->GetName(), *SpawnLocation.ToString(), *SpawnRotation.ToString());
-
-    // --- Set Spawn Parameters ---
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Owner = this; // The ship that fired it
-    SpawnParams.Instigator = this; // The Pawn is the instigator causing the damage etc.
-    // AdjustIfPossibleButAlwaysSpawn is generally safe for projectiles unless you *want* them blocked by immediate overlaps
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-    // --- Spawn the Projectile ---
-    AActor* SpawnedProjectile = World->SpawnActor<AActor>(ProjectileClass, SpawnLocation, SpawnRotation, SpawnParams);
-
-    // --- Check Spawn Result & Reset Cooldown ---
-    if (!SpawnedProjectile)
-    {
-         UE_LOG(LogSolaraqCombat, Error, TEXT("%s FireWeapon: World->SpawnActor failed for %s!"), *GetName(), *ProjectileClass->GetName());
-    }
-    else
-    {
-         UE_LOG(LogSolaraqCombat, Warning, TEXT("%s FireWeapon: Spawned %s successfully."), *GetName(), *SpawnedProjectile->GetName());
-         LastFireTime = CurrentTime; // IMPORTANT: Reset cooldown ONLY on successful spawn
-    }
+    Super::PerformFireWeapon();
 }
 
 void ASolaraqEnemyShip::RequestMoveForward(float Value)
@@ -167,5 +117,5 @@ void ASolaraqEnemyShip::RequestMoveForward(float Value)
      // If ProcessMoveForwardInput was purely for client->server, and server logic is elsewhere:
      // Server_SendMoveForwardInput(Value); // Call the Server RPC if needed
 
-     UE_LOG(LogSolaraqAI, VeryVerbose, TEXT("%s AI RequestMoveForward: %.2f"), *GetName(), Value);
+     UE_LOG(LogSolaraqAI, Warning, TEXT("%s AI RequestMoveForward: %.2f"), *GetName(), Value);
 }

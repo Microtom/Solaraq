@@ -70,6 +70,10 @@ public:
 	virtual FGenericTeamId GetGenericTeamId() const override;
 	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
 	// --- End Generic Team Interface ---
+
+	// Getter for projectile speed used by AI prediction
+	UFUNCTION(BlueprintPure, Category="Weapon") // BlueprintPure means it doesn't change state
+	float GetProjectileMuzzleSpeed() const { return ProjectileMuzzleSpeed; }
 	
 protected:
 	// --- Components ---
