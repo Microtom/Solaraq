@@ -24,6 +24,84 @@ void ASolaraqEnemyShip::Tick(float DeltaTime)
     // Any specific Tick logic for the enemy ship itself (not controller logic)
 }
 
+void ASolaraqEnemyShip::HandleDestruction()
+{
+    // Should only be called on the Server
+    if (!HasAuthority() || bIsDead)
+    {
+        return;
+    }
+
+    UE_LOG(LogSolaraqCombat, Log, TEXT("Enemy Ship %s Destroyed!"), *GetName());
+
+    // --- Spawn Loot ---
+    if (LootPickupClass && GetWorld())
+    {
+        int32 NumDrops = FMath::RandRange(MinLootDrops, MaxLootDrops);
+        if (NumDrops > 0)
+        {
+            UE_LOG(LogSolaraqSystem, Log, TEXT("Spawning %d loot drops from %s"), NumDrops, *GetName());
+            const FVector DeathLocation = GetActorLocation();
+            const FRotator SpawnRotation = FRotator::ZeroRotator; // Pickup rotation doesn't matter much
+
+            FActorSpawnParameters SpawnParams;
+            SpawnParams.Owner = nullptr; // Loot isn't "owned" by the dead ship
+            SpawnParams.Instigator = this; // The ship that died is the instigator
+            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+            for (int i = 0; i < NumDrops; ++i)
+            {
+                // Calculate random offset location
+                FVector SpawnOffset = FMath::VRand() * FMath::FRandRange(0.f, LootSpawnRadius); // Get random direction vector
+                SpawnOffset.Z = 0; // Keep on XY plane
+                FVector SpawnLocation = DeathLocation + SpawnOffset;
+
+                ASolaraqPickupBase* SpawnedPickup = GetWorld()->SpawnActor<ASolaraqPickupBase>(LootPickupClass, SpawnLocation, SpawnRotation, SpawnParams);
+
+                if (SpawnedPickup)
+                {
+                    UE_LOG(LogSolaraqSystem, Verbose, TEXT(" -> Spawned %s at %s"), *SpawnedPickup->GetName(), *SpawnLocation.ToString());
+                    // Note: Dispersal impulse is handled in the pickup's BeginPlay
+                }
+                else
+                {
+                     UE_LOG(LogSolaraqSystem, Error, TEXT(" -> Failed to spawn LootPickupClass at %s!"), *SpawnLocation.ToString());
+                }
+            }
+        }
+    }
+    // --- End Spawn Loot ---
+
+
+    // 1. Set the dead state (this will replicate via OnRep_IsDead)
+    bIsDead = true;
+
+    // 2. Immediately trigger visual/audio effects on all clients via Multicast
+    Multicast_PlayDestructionEffects();
+
+    // 3. Disable ship functionality on the server
+    // ... (existing code: stop physics, disable collision, unpossess, etc.) ...
+    if (CollisionAndPhysicsRoot)
+    {
+        CollisionAndPhysicsRoot->SetSimulatePhysics(false);
+        CollisionAndPhysicsRoot->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        CollisionAndPhysicsRoot->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+    }
+    SetActorTickEnabled(false); // Stop ticking
+    SetActorEnableCollision(ECollisionEnabled::NoCollision);
+     if (CollisionAndPhysicsRoot) CollisionAndPhysicsRoot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+     if (ShipMeshComponent) ShipMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+     AController* CurrentController = GetController();
+     if (CurrentController)
+     {
+        CurrentController->UnPossess();
+     }
+
+    // 4. Set the actor to be destroyed after a delay
+    SetLifeSpan(5.0f); // Actor will be automatically destroyed after 5 seconds
+}
+
 
 void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation)
 {

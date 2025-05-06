@@ -3,8 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Gameplay/Pickups/SolaraqPickupBase.h"
 #include "Pawns/SolaraqShipBase.h" // Include the base class header
 #include "SolaraqEnemyShip.generated.h"
+
 
 /**
  * A specialized ship pawn class for AI-controlled enemies.
@@ -59,6 +61,24 @@ protected:
 	/** How far forward from the ship's center the projectile should spawn. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
 	float MuzzleOffset = 150.0f;
+
+	// What class of pickup actor to spawn (Assign BP_Pickup_Resource etc. in derived BPs)
+	UPROPERTY(EditDefaultsOnly, Category = "Loot")
+	TSubclassOf<ASolaraqPickupBase> LootPickupClass;
+
+	// How many pickups to potentially spawn
+	UPROPERTY(EditDefaultsOnly, Category = "Loot")
+	int32 MinLootDrops = 0;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Loot")
+	int32 MaxLootDrops = 2;
+
+	// Range around the death location to spawn loot
+	UPROPERTY(EditDefaultsOnly, Category = "Loot")
+	float LootSpawnRadius = 100.0f;
+
+	UFUNCTION()
+	void HandleDestruction() override;
 
 private:
 	// Add internal helper variables/functions if needed

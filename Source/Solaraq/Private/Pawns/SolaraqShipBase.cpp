@@ -14,6 +14,7 @@
 #include "Logging/SolaraqLogChannels.h"   // Use our custom logger!
 #include "GameFramework/PlayerController.h" // Needed for IsLocalController() potentially later
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "Gameplay/Pickups/SolaraqPickupBase.h"
 #include "Net/UnrealNetwork.h"
 #include "Projectiles/SolaraqProjectile.h"
 
@@ -713,6 +714,92 @@ void ASolaraqShipBase::OnRep_TurnInputForRoll()
     //UE_LOG(LogSolaraqVisuals, VeryVerbose, TEXT("CLIENT %s OnRep_TurnInputForRoll: Received %.2f"), *GetName(), CurrentTurnInputForRoll);
 }
 
+void ASolaraqShipBase::OnRep_IronCount()
+{
+    UE_LOG(LogSolaraqSystem, VeryVerbose, TEXT("CLIENT %s OnRep_IronCount: %d"), *GetName(), CurrentIronCount);
+    OnInventoryUpdated(); // Call BP event to update UI
+}
+
+void ASolaraqShipBase::OnRep_CrystalCount()
+{
+    UE_LOG(LogSolaraqSystem, VeryVerbose, TEXT("CLIENT %s OnRep_CrystalCount: %d"), *GetName(), CurrentCrystalCount);
+    OnInventoryUpdated(); // Call BP event to update UI
+}
+
+void ASolaraqShipBase::OnRep_StandardAmmo()
+{
+    UE_LOG(LogSolaraqSystem, VeryVerbose, TEXT("CLIENT %s OnRep_StandardAmmo: %d"), *GetName(), CurrentStandardAmmo);
+    OnInventoryUpdated(); // Call BP event to update UI
+}
+
+bool ASolaraqShipBase::CollectPickup(EPickupType PickupType, int32 Quantity)
+{
+    // --- Server Only Logic ---
+    if (!HasAuthority())
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("CollectPickup called on non-authoritative instance for %s!"), *GetName());
+        return false; // Should not happen if called correctly from pickup's TryCollect
+    }
+
+    if (Quantity <= 0) return false; // Cannot collect zero or negative
+
+    UE_LOG(LogSolaraqSystem, Log, TEXT("Ship %s processing collection: Type=%d, Quantity=%d"), *GetName(), static_cast<int32>(PickupType), Quantity);
+
+    bool bCollectedSuccessfully = true; // Assume success unless inventory is full etc.
+
+    switch (PickupType)
+    {
+        case EPickupType::Resource_Iron:
+            // TODO: Add inventory capacity check if needed
+            CurrentIronCount += Quantity;
+            // OnRep_IronCount will be called automatically on clients due to replication
+            UE_LOG(LogSolaraqSystem, Verbose, TEXT(" -> Added %d Iron. New Total: %d"), Quantity, CurrentIronCount);
+            break;
+
+        case EPickupType::Resource_Crystal:
+            CurrentCrystalCount += Quantity;
+            UE_LOG(LogSolaraqSystem, Verbose, TEXT(" -> Added %d Crystal. New Total: %d"), Quantity, CurrentCrystalCount);
+            break;
+
+        case EPickupType::Ammo_Standard:
+             // TODO: Add ammo capacity check if needed
+            CurrentStandardAmmo += Quantity;
+             UE_LOG(LogSolaraqSystem, Verbose, TEXT(" -> Added %d Standard Ammo. New Total: %d"), Quantity, CurrentStandardAmmo);
+            break;
+
+        case EPickupType::Health_Pack:
+            if (CurrentHealth < MaxHealth)
+            {
+                CurrentHealth = FMath::Min(CurrentHealth + Quantity, MaxHealth); // Heal, clamp to max
+                 UE_LOG(LogSolaraqSystem, Verbose, TEXT(" -> Healed %d HP. New Health: %.1f"), Quantity, CurrentHealth);
+                 // OnRep_CurrentHealth will handle UI update
+            }
+            else {
+                 UE_LOG(LogSolaraqSystem, Log, TEXT(" -> Health already full. Health Pack wasted."));
+                 bCollectedSuccessfully = false; // Didn't actually use it
+            }
+            break;
+
+        default:
+            UE_LOG(LogSolaraqSystem, Warning, TEXT("CollectPickup: Unhandled PickupType %d"), static_cast<int32>(PickupType));
+            bCollectedSuccessfully = false;
+            break;
+    }
+
+    // Force a network update if collection was successful and values changed.
+    // This may not be strictly necessary depending on NetUpdateFrequency, but can help ensure
+    // the variable replication happens promptly for UI updates after collection.
+    if(bCollectedSuccessfully)
+    {
+        ForceNetUpdate(); // Consider if needed, potentially increases bandwidth slightly
+        // Call the Blueprint event locally on the server as well if needed immediately
+        OnInventoryUpdated();
+    }
+
+
+    return bCollectedSuccessfully;
+}
+
 void ASolaraqShipBase::SetTurnInputForRoll(float TurnValue)
 {
     // Clamp the input value
@@ -864,7 +951,11 @@ void ASolaraqShipBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
     DOREPLIFETIME(ASolaraqShipBase, CurrentHealth);
     DOREPLIFETIME(ASolaraqShipBase, bIsDead);
     // Replicate the turn input value
-    DOREPLIFETIME(ASolaraqShipBase, CurrentTurnInputForRoll); 
+    DOREPLIFETIME(ASolaraqShipBase, CurrentTurnInputForRoll);
+    // Replicate Inventory Variables
+    DOREPLIFETIME(ASolaraqShipBase, CurrentIronCount);
+    DOREPLIFETIME(ASolaraqShipBase, CurrentCrystalCount);
+    DOREPLIFETIME(ASolaraqShipBase, CurrentStandardAmmo);
 }
 
 // --- Replication Notifiers ---

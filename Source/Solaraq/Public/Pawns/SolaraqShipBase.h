@@ -129,8 +129,42 @@ protected:
 	// Replication Notifier function declaration
 	UFUNCTION() // <<< Needs to be UFUNCTION()
 	virtual void OnRep_TurnInputForRoll();
+
+	// --- Inventory / Resources ---
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_IronCount, Category = "Inventory")
+	int32 CurrentIronCount = 0;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_CrystalCount, Category = "Inventory")
+	int32 CurrentCrystalCount = 0;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_StandardAmmo, Category = "Inventory")
+	int32 CurrentStandardAmmo = 100; // Example starting ammo
+
+	UFUNCTION() // Needed for ReplicatedUsing
+	void OnRep_IronCount();
+
+	UFUNCTION() // Needed for ReplicatedUsing
+	void OnRep_CrystalCount();
+
+	UFUNCTION() // Needed for ReplicatedUsing
+	void OnRep_StandardAmmo();
+
+	// Blueprint event for UI updates (Optional but recommended)
+	UFUNCTION(BlueprintImplementableEvent, Category = "Inventory")
+	void OnInventoryUpdated(); // Call this inside OnRep functions
 	
 public:
+
+	/**
+	 * Called by a pickup actor on the server when this ship collects it.
+	 * @param PickupType The type of item being collected.
+	 * @param Quantity The amount of the item.
+	 * @return True if the pickup was successfully processed, false otherwise (e.g., inventory full).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Pickup") // Can be called from BP if needed
+	virtual bool CollectPickup(EPickupType PickupType, int32 Quantity);
+	
 	/** Public function to allow the controller (or input binding) to update the turn input state */
 	void SetTurnInputForRoll(float TurnValue);
 	
