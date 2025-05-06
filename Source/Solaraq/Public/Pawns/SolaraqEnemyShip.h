@@ -26,7 +26,7 @@ public:
 	 * Called by the AI Controller.
 	 * @param TargetLocation The world location to face.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "AI|Control")
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|AI|Control")
 	virtual void TurnTowards(const FVector& TargetLocation);
 
 	/**
@@ -34,7 +34,7 @@ public:
 	 * Called by the AI Controller.
 	 * TODO: Add parameters for specific weapon groups if needed.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "AI|Control")
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|AI|Control")
 	virtual void FireWeapon();
 
 	/**
@@ -43,7 +43,7 @@ public:
 	 * For now, we can just call the base class server RPC.
 	 * @param Value Input axis value (-1.0 to 1.0).
 	 */
-	UFUNCTION(BlueprintCallable, Category = "AI|Control")
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|AI|Control")
 	virtual void RequestMoveForward(float Value);
 
 
@@ -59,22 +59,22 @@ protected:
 	// --- Weapon Properties ---
 	
 	/** How far forward from the ship's center the projectile should spawn. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Weapon")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Weapon")
 	float MuzzleOffset = 150.0f;
 
 	// What class of pickup actor to spawn (Assign BP_Pickup_Resource etc. in derived BPs)
-	UPROPERTY(EditDefaultsOnly, Category = "Loot")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Loot")
 	TSubclassOf<ASolaraqPickupBase> LootPickupClass;
 
 	// How many pickups to potentially spawn
-	UPROPERTY(EditDefaultsOnly, Category = "Loot")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Loot")
 	int32 MinLootDrops = 0;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Loot")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Loot")
 	int32 MaxLootDrops = 2;
 
 	// Range around the death location to spawn loot
-	UPROPERTY(EditDefaultsOnly, Category = "Loot")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Loot")
 	float LootSpawnRadius = 100.0f;
 
 	UFUNCTION()
