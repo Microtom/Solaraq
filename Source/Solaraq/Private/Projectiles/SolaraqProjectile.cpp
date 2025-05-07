@@ -25,7 +25,7 @@ ASolaraqProjectile::ASolaraqProjectile()
     CollisionComp = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionComp"));
     CollisionComp->InitSphereRadius(15.0f); // Set a sensible default radius
     CollisionComp->SetCollisionProfileName(TEXT("Projectile")); // <<< IMPORTANT: Use the custom preset name!
-    CollisionComp->SetNotifyRigidBodyCollision(true); // Generate hit events
+    CollisionComp->SetGenerateOverlapEvents(true); 
     CollisionComp->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Unwalkable, 0.f));
     CollisionComp->CanCharacterStepUpOn = ECB_No;
     CollisionComp->SetIsReplicated(true); // Replicate the collision component state
@@ -59,71 +59,66 @@ void ASolaraqProjectile::BeginPlay()
     // Bind the OnHit function AFTER components are created and initialized
     if (CollisionComp)
     {
-        CollisionComp->OnComponentHit.AddDynamic(this, &ASolaraqProjectile::OnHit);
-        UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s: OnHit delegate bound."), *GetName());
+        // CollisionComp->OnComponentHit.AddDynamic(this, &ASolaraqProjectile::OnHit);
+        CollisionComp->OnComponentBeginOverlap.AddDynamic(this, &ASolaraqProjectile::OnOverlapBegin); // <<< CHANGE THIS
+        UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s: OnOverlapBegin delegate bound."), *GetName());
     }
     else
     {
-         UE_LOG(LogSolaraqProjectile, Error, TEXT("Projectile %s: CollisionComp is NULL in BeginPlay! Cannot bind OnHit."), *GetName());
+        UE_LOG(LogSolaraqProjectile, Error, TEXT("Projectile %s: CollisionComp is NULL in BeginPlay! Cannot bind OnOverlapBegin."), *GetName());
     }
 
     UE_LOG(LogSolaraqProjectile, Log, TEXT("Projectile %s Spawned. InitialSpeed: %.1f, LifeSpan: %.1f"),
         *GetName(), ProjectileMovement ? ProjectileMovement->InitialSpeed : -1.f, InitialLifeSpan);
 }
 
-void ASolaraqProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+void ASolaraqProjectile::OnOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+    UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-    // Only process hit if it's a valid hit against a different actor/component
+    // Only process hit if it's a valid overlap against a different actor/component
     if ((OtherActor != nullptr) && (OtherActor != this) && (OtherComp != nullptr))
     {
-         UE_LOG(LogSolaraqProjectile, Log, TEXT("Projectile %s Hit: %s (Component: %s)"),
+         UE_LOG(LogSolaraqProjectile, Log, TEXT("Projectile %s Overlapped: %s (Component: %s)"), // Changed log message
              *GetName(), *OtherActor->GetName(), *OtherComp->GetName());
 
-        // --- Check if we hit a Solaraq Ship ---
         ASolaraqShipBase* HitShip = Cast<ASolaraqShipBase>(OtherActor);
         if (HitShip)
         {
-            UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s hit Ship %s!"), *GetName(), *HitShip->GetName());
+            UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s overlapped Ship %s!"), *GetName(), *HitShip->GetName());
 
-            // --- Apply Damage (Server Only) ---
-            if (HasAuthority()) // Only the server should deal damage
+            if (HasAuthority())
             {
-                // Ensure a valid damage type class is set
                 TSubclassOf<UDamageType> DmgTypeClass = DamageTypeClass ? DamageTypeClass : TSubclassOf<UDamageType>(UDamageType::StaticClass());
 
-                // Prepare damage event data
-                FPointDamageEvent DamageEvent(BaseDamage, Hit, NormalImpulse, DmgTypeClass);
+                // Use SweepResult for FPointDamageEvent.
+                // SweepResult.ImpactNormal can be used for the ShotDirection.
+                FPointDamageEvent DamageEvent(BaseDamage, SweepResult, SweepResult.ImpactNormal, DmgTypeClass);
 
-                // Get the controller responsible for this projectile (who fired it)
                 AController* InstigatorController = GetInstigatorController();
-
-                UE_LOG(LogSolaraqProjectile, Log, TEXT("Server: Applying %.1f PointDamage to %s from %s (Instigator: %s)"),
+                UE_LOG(LogSolaraqProjectile, Log, TEXT("Server: Applying %.1f PointDamage to %s from %s (Instigator: %s) via Overlap"),
                        BaseDamage, *OtherActor->GetName(), *GetNameSafe(this), *GetNameSafe(InstigatorController));
-
-                // Apply the damage
                 OtherActor->TakeDamage(BaseDamage, DamageEvent, InstigatorController, this);
             }
         }
         else
         {
-            // Optionally handle hitting other things (asteroids, environment, etc.)
-            UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s hit something other than a ship."), *GetName());
+            UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s overlapped something other than a ship."), *GetName());
+            // If you want projectiles to be destroyed by hitting other things (like asteroids that might also be set to overlap projectiles)
+            // you might add destruction logic here too. For now, it only destroys after hitting a ship.
         }
 
-        // --- Destroy the Projectile ---
-        // The server is the authority on destruction. Client effects can be triggered via multicast before this if needed.
+        // Destroy the Projectile on the server.
+        // Clients can play effects immediately and then the actor will be destroyed.
         if (HasAuthority())
         {
-             UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Server: Destroying projectile %s after hit."), *GetName());
+             UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Server: Destroying projectile %s after overlap."), *GetName());
             Destroy();
         }
-        // If not server, stop the projectile immediately visually and maybe play local FX
-        else
+        else // Client-side cleanup if needed before server destruction
         {
             if (ProjectileMovement) ProjectileMovement->StopMovementImmediately();
-            SetActorEnableCollision(false); // Stop further hits locally
-             // You might play a client-side impact effect here
+            SetActorEnableCollision(false); // Stop further overlaps locally
+            // Play client-side impact effect here if desired
         }
-
-    } // End safety check for valid hit
+    }
 }
