@@ -49,6 +49,14 @@ ASolaraqProjectile::ASolaraqProjectile()
     // --- Set Default Properties ---
     InitialLifeSpan = ProjectileLifeSpan; // Use the UPROPERTY variable
     DamageTypeClass = UDamageType::StaticClass(); // Default damage type
+
+    BaseDamage = 25.0f;
+}
+
+void ASolaraqProjectile::SetBaseDamage(float NewDamage)
+{
+    BaseDamage = NewDamage;
+    // UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s BaseDamage set to %.1f"), *GetName(), BaseDamage);
 }
 
 // Called when the game starts or when spawned

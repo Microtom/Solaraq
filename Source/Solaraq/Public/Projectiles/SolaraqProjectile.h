@@ -20,6 +20,13 @@ public:
     // Sets default values for this actor's properties
     ASolaraqProjectile();
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Projectile")
+    float BaseDamage; // Make sure this is public or has a getter if you need it elsewhere
+
+    /** Sets the base damage for this projectile instance */
+    UFUNCTION(BlueprintCallable, Category = "Projectile")
+    void SetBaseDamage(float NewDamage);
+
 protected:
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
@@ -39,10 +46,7 @@ protected:
     TObjectPtr<UProjectileMovementComponent> ProjectileMovement;
 
     // --- Properties ---
-
-    /** Base damage dealt by this projectile on hit */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile|Damage")
-    float BaseDamage = 25.0f;
+    
 
     /** Type of damage this projectile deals */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Projectile|Damage")
