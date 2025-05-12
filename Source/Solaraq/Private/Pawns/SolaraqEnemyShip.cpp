@@ -35,7 +35,7 @@ void ASolaraqEnemyShip::HandleDestruction()
     UE_LOG(LogSolaraqCombat, Log, TEXT("Enemy Ship %s Destroyed!"), *GetName());
 
     // --- Spawn Loot ---
-    if (LootPickupClass && GetWorld())
+  /*  if (LootPickupClass && GetWorld())
     {
         int32 NumDrops = FMath::RandRange(MinLootDrops, MaxLootDrops);
         if (NumDrops > 0)
@@ -71,7 +71,7 @@ void ASolaraqEnemyShip::HandleDestruction()
         }
     }
     // --- End Spawn Loot ---
-
+*/
 
     // 1. Set the dead state (this will replicate via OnRep_IsDead)
     bIsDead = true;

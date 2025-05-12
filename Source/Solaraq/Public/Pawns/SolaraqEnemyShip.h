@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Gameplay/Pickups/SolaraqPickupBase.h"
+//#include "Gameplay/Pickups/SolaraqPickupBase.h"
 #include "Pawns/SolaraqShipBase.h" // Include the base class header
 #include "SolaraqEnemyShip.generated.h"
 
@@ -63,8 +63,8 @@ protected:
 	float MuzzleOffset = 150.0f;
 
 	// What class of pickup actor to spawn (Assign BP_Pickup_Resource etc. in derived BPs)
-	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Loot")
-	TSubclassOf<ASolaraqPickupBase> LootPickupClass;
+//	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Loot")
+//	TSubclassOf<ASolaraqPickupBase> LootPickupClass;
 
 	// How many pickups to potentially spawn
 	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Loot")

@@ -14,7 +14,7 @@
 #include "Logging/SolaraqLogChannels.h"   // Use our custom logger!
 #include "GameFramework/PlayerController.h" // Needed for IsLocalController() potentially later
 #include "GameFramework/ProjectileMovementComponent.h"
-#include "Gameplay/Pickups/SolaraqPickupBase.h"
+//#include "Gameplay/Pickups/SolaraqPickupBase.h"
 #include "Net/UnrealNetwork.h"
 #include "Projectiles/SolaraqProjectile.h"
 
@@ -157,7 +157,7 @@ void ASolaraqShipBase::Client_ResetVisualScale_Implementation()
     // Apply the default scale locally on the client
     ApplyVisualScale(1.0f); // Assuming 1.0 represents the default scale factor
 }
-
+/*
 void ASolaraqShipBase::Server_DockWithPad(UDockingPadComponent* PadToDockWith)
 {
     // --- SERVER ONLY ---
@@ -238,7 +238,7 @@ bool ASolaraqShipBase::IsDockedTo(const UDockingPadComponent* Pad) const
 {
     return bIsDocked && (DockedToPadComponent == Pad);
 }
-
+*/
 float ASolaraqShipBase::TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent,
     class AController* EventInstigator, AActor* DamageCauser)
 {
@@ -536,7 +536,7 @@ void ASolaraqShipBase::ClampVelocity()
         //UE_LOG(LogSolaraqMovement, Warning, TEXT("[%s] Clamping speed. Current: %.2f, Max: %.2f"), HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"), CurrentVelocity.Size(), CurrentMaxSpeed);
     }
 }
-
+/*
 void ASolaraqShipBase::PerformDockingAttachment()
 {
     // --- SERVER ONLY ---
@@ -646,7 +646,7 @@ void ASolaraqShipBase::EnableSystemsAfterUndocking()
     }
     // Re-allow boosting etc.
 }
-
+*/
 // Called to bind functionality to input
 void ASolaraqShipBase::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -731,7 +731,7 @@ void ASolaraqShipBase::OnRep_StandardAmmo()
     UE_LOG(LogSolaraqSystem, VeryVerbose, TEXT("CLIENT %s OnRep_StandardAmmo: %d"), *GetName(), CurrentStandardAmmo);
     OnInventoryUpdated(); // Call BP event to update UI
 }
-
+/*
 bool ASolaraqShipBase::CollectPickup(EPickupType PickupType, int32 Quantity)
 {
     // --- Server Only Logic ---
@@ -799,7 +799,7 @@ bool ASolaraqShipBase::CollectPickup(EPickupType PickupType, int32 Quantity)
 
     return bCollectedSuccessfully;
 }
-
+*/
 void ASolaraqShipBase::SetTurnInputForRoll(float TurnValue)
 {
     // Clamp the input value
@@ -945,8 +945,8 @@ void ASolaraqShipBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
     DOREPLIFETIME(ASolaraqShipBase, bIsAttemptingBoostInput); // Replicate the *request*
     DOREPLIFETIME(ASolaraqShipBase, bIsBoosting);            // Replicate the *actual* state
     DOREPLIFETIME_CONDITION(ASolaraqShipBase, MaxEnergy, COND_InitialOnly); // Max energy likely won't change after spawn
-    DOREPLIFETIME(ASolaraqShipBase, bIsDocked);
-    DOREPLIFETIME(ASolaraqShipBase, DockedToPadComponent);
+//    DOREPLIFETIME(ASolaraqShipBase, bIsDocked);
+//    DOREPLIFETIME(ASolaraqShipBase, DockedToPadComponent);
     // Replicate Health and Death State
     DOREPLIFETIME(ASolaraqShipBase, CurrentHealth);
     DOREPLIFETIME(ASolaraqShipBase, bIsDead);
