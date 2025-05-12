@@ -7,7 +7,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "GenericTeamAgentInterface.h"
-#include "Components/DockingPadComponent.h" // Includes EDockingStatus
+//#include "Components/DockingPadComponent.h" // Includes EDockingStatus
 #include "SolaraqShipBase.generated.h" // Must be last include
 
 class ASolaraqProjectile;
@@ -162,8 +162,8 @@ public:
 	 * @param Quantity The amount of the item.
 	 * @return True if the pickup was successfully processed, false otherwise (e.g., inventory full).
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Pickup") // Can be called from BP if needed
-	virtual bool CollectPickup(EPickupType PickupType, int32 Quantity);
+//	UFUNCTION(BlueprintCallable, Category = "Pickup") // Can be called from BP if needed
+//	virtual bool CollectPickup(EPickupType PickupType, int32 Quantity);
 	
 	/** Public function to allow the controller (or input binding) to update the turn input state */
 	void SetTurnInputForRoll(float TurnValue);
@@ -261,12 +261,12 @@ protected:
 	// --- Docking State ---
 
 	/** True if the ship is currently docked to a pad. Replicated with notification. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_IsDocked)
-	bool bIsDocked = false;
+	//UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_IsDocked)
+	//bool bIsDocked = false;
 
 	/** Reference to the specific docking pad component we are docked to. Replicated with notification. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_DockedToPad)
-	TObjectPtr<UDockingPadComponent> DockedToPadComponent;
+//	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_DockedToPad)
+//	TObjectPtr<UDockingPadComponent> DockedToPadComponent;
 
 	// --- Server-Side Movement Logic ---
 
@@ -317,12 +317,12 @@ protected:
 	virtual void OnRep_IsBoosting();
 
 	/** Replication notification function for bIsDocked. Called on Clients. */
-	UFUNCTION()
-	virtual void OnRep_IsDocked();
+	//UFUNCTION()
+	//virtual void OnRep_IsDocked();
 
 	/** Replication notification function for DockedToPadComponent. Called on Clients. */
-	UFUNCTION()
-	virtual void OnRep_DockedToPad();
+	//UFUNCTION()
+	//virtual void OnRep_DockedToPad();
 
 	// --- Health & Destruction ---
 
@@ -358,24 +358,24 @@ public:
 	// --- Docking Logic ---
 
 	/** Server-side function called BY the Docking Pad to initiate docking ON this ship. Handles state changes and attachment. */
-	UFUNCTION(BlueprintCallable, Category = "Solaraq|Docking") // Callable from BP for potential future use
-	virtual void Server_DockWithPad(UDockingPadComponent* PadToDockWith);
+//	UFUNCTION(BlueprintCallable, Category = "Solaraq|Docking") // Callable from BP for potential future use
+//	virtual void Server_DockWithPad(UDockingPadComponent* PadToDockWith);
 
 	/** Server RPC called by client input or logic to request undocking. Handles state changes and detachment. */
-	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Solaraq|Docking")
-	void Server_RequestUndock();
+	//UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Solaraq|Docking")
+	//void Server_RequestUndock();
 protected:
 	/** Server-side helper function to handle the actual physics disabling and component attachment during docking. */
-	void PerformDockingAttachment();
+	//void PerformDockingAttachment();
 
 	/** Server-side helper function to handle the actual component detachment and physics re-enabling during undocking. */
-	void PerformUndockingDetachment();
+	//void PerformUndockingDetachment();
 
 	/** Server-side helper function to disable relevant ship systems (input, boost, etc.) when docked. */
-	virtual void DisableSystemsForDocking();
+	//virtual void DisableSystemsForDocking();
 
 	/** Server-side helper function to re-enable relevant ship systems after undocking. */
-	virtual void EnableSystemsAfterUndocking();
+	//virtual void EnableSystemsAfterUndocking();
 
 
 public:
@@ -403,16 +403,16 @@ public:
 	bool IsBoosting() const { return bIsBoosting; }
 
 	/** Returns true if the ship is currently docked. */
-	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
-	bool IsDocked() const { return bIsDocked; }
+	//UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
+	//bool IsDocked() const { return bIsDocked; }
 
 	/** Returns true if the ship is docked specifically to the given pad component. */
-	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
-	bool IsDockedTo(const UDockingPadComponent* Pad) const;
+//	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
+//	bool IsDockedTo(const UDockingPadComponent* Pad) const;
 
 	/** Gets the docking pad component the ship is currently docked to, if any. */
-	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
-	UDockingPadComponent* GetCurrentDockingPad() const { return DockedToPadComponent; }
+//	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
+//	UDockingPadComponent* GetCurrentDockingPad() const { return DockedToPadComponent; }
 
 	/** Gets the current health as a fraction of maximum health (0.0 to 1.0). */
 	UFUNCTION(BlueprintPure, Category = "Solaraq|Health")
