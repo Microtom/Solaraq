@@ -75,7 +75,7 @@ void ASolaraqPlayerController::SetupInputComponent()
     {
         // Bind to Triggered for single shots or hold-to-fire start
         EnhancedInputComponentRef->BindAction(FireAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleFireRequest);
-         UE_LOG(LogSolaraqSystem, Verbose, TEXT(" - FireAction Bound"));
+         UE_LOG(LogSolaraqProjectile, Warning, TEXT(" - FireAction Bound"));
     } else { UE_LOG(LogSolaraqSystem, Warning, TEXT("FireAction not assigned in PlayerController!")); }
 
     if (BoostAction)
@@ -84,7 +84,12 @@ void ASolaraqPlayerController::SetupInputComponent()
         EnhancedInputComponentRef->BindAction(BoostAction, ETriggerEvent::Completed, this, &ASolaraqPlayerController::HandleBoostCompleted);
          UE_LOG(LogSolaraqSystem, Verbose, TEXT(" - BoostAction Bound (Started/Completed)"));
     } else { UE_LOG(LogSolaraqSystem, Warning, TEXT("BoostAction not assigned in PlayerController!")); }
-    
+
+    if (FireMissileAction)
+    {
+        EnhancedInputComponentRef->BindAction(FireMissileAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleFireMissileRequest);
+                UE_LOG(LogSolaraqProjectile, Warning, TEXT(" - FireHomingAction Bound"));
+    } else { UE_LOG(LogSolaraqSystem, Warning, TEXT("FireHomingAction not assigned in PlayerController!")); }
 }
 
 ASolaraqShipBase* ASolaraqPlayerController::GetControlledShip() const
@@ -138,6 +143,18 @@ void ASolaraqPlayerController::HandleTurnInput(const FInputActionValue& Value)
         // Call the Server RPC on the Pawn
         Ship->Server_SendTurnInput(TurnValue);
         // UE_LOG(LogSolaraqInput, Verbose, TEXT("HandleTurnInput: %.2f"), TurnValue);
+    }
+}
+
+void ASolaraqPlayerController::HandleFireMissileRequest(const FInputActionValue& Value)
+{
+    //UE_LOG(LogSolaraqProjectile, Warning, TEXT("HandleFireHomingRequest: INPUT ACTION TRIGGERED!"));
+    
+    ASolaraqShipBase* Ship = GetControlledShip();
+    if (Ship)
+    {
+        Ship->Server_RequestFireHomingMissile();
+        // UE_LOG(LogSolaraqInput, Verbose, TEXT("HandleFireHomingRequest called"));
     }
 }
 

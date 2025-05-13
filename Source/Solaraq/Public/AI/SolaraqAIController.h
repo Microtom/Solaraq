@@ -41,26 +41,7 @@ public:
 	virtual FGenericTeamId GetGenericTeamId() const override;
 	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
 	// --- End Generic Team Interface ---
-	
-	/**
-		 * Calculates the future intercept point for aiming a projectile.
-		 * @param ShooterLocation Current location of the shooter (weapon muzzle).
-		 * @param ShooterVelocity Current velocity vector of the shooter.
-		 * @param TargetLocation Current location of the target.
-		 * @param TargetVelocity Current velocity vector of the target.
-		 * @param ProjectileSpeed Speed of the projectile (scalar, assumed constant).
-		 * @param InterceptPoint (Output) The calculated world location to aim at.
-		 * @return True if a valid future intercept point was found, false otherwise.
-		 */
-	UFUNCTION(BlueprintPure, Category = "Solaraq|AI|Prediction", meta = (DisplayName = "Calculate Intercept Point"))
-	static bool CalculateInterceptPoint(
-		FVector ShooterLocation,
-		FVector ShooterVelocity,
-		FVector TargetLocation,
-		FVector TargetVelocity,
-		float ProjectileSpeed,
-		FVector& InterceptPoint // Output parameter
-	);
+
 
 protected:
     //~ Begin AController Interface

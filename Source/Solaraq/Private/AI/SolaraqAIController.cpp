@@ -3,6 +3,7 @@
 #include "AI/SolaraqAIController.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
+#include "Utils/SolaraqMathLibrary.h"
 #include "Pawns/SolaraqShipBase.h" // Include your ship base class
 #include "GameFramework/Pawn.h"
 #include "GenericTeamAgentInterface.h"
@@ -12,68 +13,6 @@
 #include "Pawns/SolaraqEnemyShip.h"
 #include "Components/SphereComponent.h"
 
-
-bool ASolaraqAIController::CalculateInterceptPoint(
-    FVector ShooterLocation, FVector ShooterVelocity,
-    FVector TargetLocation, FVector TargetVelocity,
-    float ProjectileSpeed, FVector& InterceptPoint)
-{
-    const FVector RelativePosition = TargetLocation - ShooterLocation;
-    const FVector RelativeVelocity = TargetVelocity - ShooterVelocity;
-
-    const float a = FVector::DotProduct(RelativeVelocity, RelativeVelocity) - FMath::Square(ProjectileSpeed);
-    const float b = 2.0f * FVector::DotProduct(RelativePosition, RelativeVelocity);
-    const float c = FVector::DotProduct(RelativePosition, RelativePosition);
-
-    float t = -1.0f; // Intercept time, initialize to invalid
-
-    if (FMath::IsNearlyZero(a)) // Check for linear equation case (relative speed ~= projectile speed)
-    {
-        if (!FMath::IsNearlyZero(b))
-        {
-            t = -c / b;
-        }
-        // else: Both a and b are zero, c is likely also zero (already colliding?) or non-zero (parallel, never catch up). No solution.
-    }
-    else
-    {
-        const float Discriminant = FMath::Square(b) - 4.0f * a * c;
-
-        if (Discriminant >= 0.0f) // Check for real solutions
-        {
-            const float SqrtDiscriminant = FMath::Sqrt(Discriminant);
-            const float t1 = (-b + SqrtDiscriminant) / (2.0f * a);
-            const float t2 = (-b - SqrtDiscriminant) / (2.0f * a);
-
-            // Select the smallest positive time
-            if (t1 > KINDA_SMALL_NUMBER && (t2 <= KINDA_SMALL_NUMBER || t1 < t2))
-            {
-                t = t1;
-            }
-            else if (t2 > KINDA_SMALL_NUMBER)
-            {
-                t = t2;
-            }
-            // Else: Both solutions are non-positive, no future intercept.
-        }
-        // Else: Discriminant < 0, no real solutions (target too fast/far).
-    }
-
-    if (t > KINDA_SMALL_NUMBER) // We found a valid positive time
-    {
-        InterceptPoint = TargetLocation + TargetVelocity * t;
-         // Optional Logging:
-        // UE_LOG(LogSolaraqAI, Verbose, TEXT("Intercept Calculated: t=%.3f, Point=%s"), t, *InterceptPoint.ToString());
-        return true;
-    }
-    else // No valid positive time found
-    {
-        // Fallback: Aim directly at the target if prediction fails?
-        InterceptPoint = TargetLocation;
-        //UE_LOG(LogSolaraqAI, Warning, TEXT("Intercept Failed. Aiming directly. a=%.2f, b=%.2f, c=%.2f"), a, b, c);
-        return false;
-    }
-}
 
 ASolaraqAIController::ASolaraqAIController(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
@@ -274,7 +213,7 @@ void ASolaraqAIController::Tick(float DeltaTime)
          {
              // Prediction needs TargetLocation, TargetVelocity, ShipLocation, ShipVelocity
              float ProjectileSpeed = ControlledEnemyShip->GetProjectileMuzzleSpeed();
-             bool bPredictionSuccess = CalculateInterceptPoint(ShipLocation, ShipVelocity, TargetLocation, TargetVelocity, ProjectileSpeed, PredictedAimLocation);
+             bool bPredictionSuccess = USolaraqMathLibrary::CalculateInterceptPoint(ShipLocation, ShipVelocity, TargetLocation, TargetVelocity, ProjectileSpeed, PredictedAimLocation);
              if (!bPredictionSuccess) PredictedAimLocation = TargetLocation;
 
              // Aiming/Firing conditional logic
