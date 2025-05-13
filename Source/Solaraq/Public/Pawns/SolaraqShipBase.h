@@ -10,6 +10,7 @@
 //#include "Components/DockingPadComponent.h" // Includes EDockingStatus
 #include "SolaraqShipBase.generated.h" // Must be last include
 
+class ASolaraqHomingProjectile;
 class ASolaraqProjectile;
 // Forward declarations (best practice)
 class UStaticMeshComponent;
@@ -95,6 +96,8 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> MuzzlePoint;
 
+
+	
 	// --- Movement Properties ---
 
 	/** Base force applied for forward/backward thrust (scaled by input). */
@@ -258,6 +261,26 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Health", ReplicatedUsing = OnRep_IsDead)
 	bool bIsDead = false;
 
+	// --- Missile Properties ---
+	
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Weapon|HomingMissile")
+	TSubclassOf<ASolaraqHomingProjectile> HomingProjectileClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Weapon|HomingMissile")
+	float HomingMissileFireRate; // Seconds between shots
+
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Weapon|HomingMissile")
+	float HomingMissileLaunchSpeed; // Speed missile is launched at, can be 0 if PMC InitialSpeed is used
+
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Weapon|HomingMissile")
+	float MaxHomingTargetRange; // Max range to acquire a homing target
+
+	float LastHomingFireTime;
+
+	void PerformFireHomingMissile();
+
+	AActor* FindBestHomingTarget() const;
+	
 	// --- Docking State ---
 
 	/** True if the ship is currently docked to a pad. Replicated with notification. */
@@ -297,6 +320,9 @@ public:
 	/** Server RPC called by the client player to request firing the weapon. */
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Solaraq|Weapon") // Make callable if needed from BP input
 	void Server_RequestFire();
+
+	UFUNCTION(Server, Reliable)
+	void Server_RequestFireHomingMissile();
 	
 	// --- Replication Notifiers (Called on Clients) ---
 protected:
@@ -377,8 +403,10 @@ protected:
 	/** Server-side helper function to re-enable relevant ship systems after undocking. */
 	//virtual void EnableSystemsAfterUndocking();
 
-
 public:
+	
+	
+
 	// --- Public Getters ---
 
 	/** Gets the physics root component (BoxComponent). */

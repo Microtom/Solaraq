@@ -62,7 +62,10 @@ protected:
     /** Input Action for firing weapons */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputAction> FireAction;
-
+    
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    TObjectPtr<UInputAction> FireMissileAction;
+    
     /** Input Action for activating boost */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
     TObjectPtr<UInputAction> BoostAction;
@@ -78,6 +81,8 @@ protected:
     /** Called for TurnAction input */
     void HandleTurnInput(const FInputActionValue& Value);
 
+    void HandleFireMissileRequest(const FInputActionValue& Value);
+    
     /** Called for FireAction input (when triggered) */
     void HandleFireRequest(); // Renamed for clarity
 
