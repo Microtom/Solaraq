@@ -15,6 +15,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqAI, Log, All);         // For AI behavior
 DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqUI, Log, All);         // For UI related logs
 DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqCelestials, Log, All); // For planets and stars
 DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqProjectile, Log, All); // For planets and stars
+DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqMarker, Log, All); // For planets and stars
 
 // --- Blueprint Enum for Selecting Category ---
 UENUM(BlueprintType)
@@ -27,7 +28,8 @@ enum class ESolaraqLogCategory : uint8
 	AI          UMETA(DisplayName = "AI"),
 	Celestials  UMETA(DisplayName = "Celestials"),
 	UI          UMETA(DisplayName = "UI"),
-	Projectile          UMETA(DisplayName = "Projectile")
+	Projectile  UMETA(DisplayName = "Projectile"),
+	Marker      UMETA(DisplayName = "Projectile")
 	// Add matching entries here if you add new categories above
 };
 

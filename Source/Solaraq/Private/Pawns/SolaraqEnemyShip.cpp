@@ -8,7 +8,7 @@
 ASolaraqEnemyShip::ASolaraqEnemyShip()
 {
     // Constructor code if needed (e.g., setting default values different from base)
-    //UE_LOG(LogSolaraqAI, Warning, TEXT("ASolaraqEnemyShip %s Constructed"), *GetName());
+    ////UE_LOG(LogSolaraqAI, Warning, TEXT("ASolaraqEnemyShip %s Constructed"), *GetName());
      FireRate = FMath::RandRange(0.4f, 0.8f); // Example: Randomize fire rate slightly per instance
 }
 
@@ -32,7 +32,7 @@ void ASolaraqEnemyShip::HandleDestruction()
         return;
     }
 
-    UE_LOG(LogSolaraqCombat, Log, TEXT("Enemy Ship %s Destroyed!"), *GetName());
+    //UE_LOG(LogSolaraqCombat, Log, TEXT("Enemy Ship %s Destroyed!"), *GetName());
 
     // --- Spawn Loot ---
   /*  if (LootPickupClass && GetWorld())
@@ -40,7 +40,7 @@ void ASolaraqEnemyShip::HandleDestruction()
         int32 NumDrops = FMath::RandRange(MinLootDrops, MaxLootDrops);
         if (NumDrops > 0)
         {
-            UE_LOG(LogSolaraqSystem, Log, TEXT("Spawning %d loot drops from %s"), NumDrops, *GetName());
+            //UE_LOG(LogSolaraqSystem, Log, TEXT("Spawning %d loot drops from %s"), NumDrops, *GetName());
             const FVector DeathLocation = GetActorLocation();
             const FRotator SpawnRotation = FRotator::ZeroRotator; // Pickup rotation doesn't matter much
 
@@ -60,12 +60,12 @@ void ASolaraqEnemyShip::HandleDestruction()
 
                 if (SpawnedPickup)
                 {
-                    UE_LOG(LogSolaraqSystem, Verbose, TEXT(" -> Spawned %s at %s"), *SpawnedPickup->GetName(), *SpawnLocation.ToString());
+                    //UE_LOG(LogSolaraqSystem, Verbose, TEXT(" -> Spawned %s at %s"), *SpawnedPickup->GetName(), *SpawnLocation.ToString());
                     // Note: Dispersal impulse is handled in the pickup's BeginPlay
                 }
                 else
                 {
-                     UE_LOG(LogSolaraqSystem, Error, TEXT(" -> Failed to spawn LootPickupClass at %s!"), *SpawnLocation.ToString());
+                     //UE_LOG(LogSolaraqSystem, Error, TEXT(" -> Failed to spawn LootPickupClass at %s!"), *SpawnLocation.ToString());
                 }
             }
         }
@@ -116,7 +116,7 @@ void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation)
     FRotator TargetRotation = DirectionToTarget.Rotation();
     FRotator CurrentRotation = CollisionAndPhysicsRoot->GetComponentRotation(); // Use physics rotation
 
-    //UE_LOG(LogSolaraqAI, Warning, TEXT("TurnTowards --- CurrentRot(Physics): %s, TargetRot(World): %s"), *CurrentRotation.ToString(), *TargetRotation.ToString()); // Optional Log
+    ////UE_LOG(LogSolaraqAI, Warning, TEXT("TurnTowards --- CurrentRot(Physics): %s, TargetRot(World): %s"), *CurrentRotation.ToString(), *TargetRotation.ToString()); // Optional Log
 
     float CurrentYaw = CurrentRotation.Yaw;
     float TargetYaw = TargetRotation.Yaw;
@@ -132,10 +132,10 @@ void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation)
         {
             // Apply damping faster when close to target
             CollisionAndPhysicsRoot->SetPhysicsAngularVelocityInDegrees(FVector(CurrentAngularVel.X, CurrentAngularVel.Y, CurrentAngularVel.Z * 0.5f));
-            //UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f). Applying damping to AngVelZ: %.2f"), *GetName(), YawDifference, CurrentAngularVel.Z * 0.5f);
+            ////UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f). Applying damping to AngVelZ: %.2f"), *GetName(), YawDifference, CurrentAngularVel.Z * 0.5f);
         }
         else {
-             //UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f) and AngVelZ low. No torque/damping."), *GetName(), YawDifference);
+             ////UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f) and AngVelZ low. No torque/damping."), *GetName(), YawDifference);
         }
         return; // Don't apply positive torque if already aligned
     }
@@ -161,7 +161,7 @@ void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation)
     // Keep AccelChange=true for now unless you have specific reasons to use mass
     CollisionAndPhysicsRoot->AddTorqueInDegrees(TorqueToApply, NAME_None, true);
 
-    //UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: YawDiff: %.2f, Factor: %.2f, Applying Torque: %.2f"), *GetName(), YawDifference, TorqueFactor, TorqueToApply.Z);
+    ////UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: YawDiff: %.2f, Factor: %.2f, Applying Torque: %.2f"), *GetName(), YawDifference, TorqueFactor, TorqueToApply.Z);
 }
 
 void ASolaraqEnemyShip::FireWeapon()
@@ -195,5 +195,5 @@ void ASolaraqEnemyShip::RequestMoveForward(float Value)
      // If ProcessMoveForwardInput was purely for client->server, and server logic is elsewhere:
      // Server_SendMoveForwardInput(Value); // Call the Server RPC if needed
 
-     UE_LOG(LogSolaraqAI, Warning, TEXT("%s AI RequestMoveForward: %.2f"), *GetName(), Value);
+     //UE_LOG(LogSolaraqAI, Warning, TEXT("%s AI RequestMoveForward: %.2f"), *GetName(), Value);
 }
