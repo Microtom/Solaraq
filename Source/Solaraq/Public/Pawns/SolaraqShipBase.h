@@ -277,9 +277,8 @@ protected:
 
 	float LastHomingFireTime;
 
-	void PerformFireHomingMissile();
+	void PerformFireHomingMissile(AActor* HomingTarget);
 
-	AActor* FindBestHomingTarget() const;
 	
 	// --- Docking State ---
 
@@ -321,8 +320,9 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Solaraq|Weapon") // Make callable if needed from BP input
 	void Server_RequestFire();
 
-	UFUNCTION(Server, Reliable)
-	void Server_RequestFireHomingMissile();
+	// MODIFIED RPC: Now takes a target parameter
+    UFUNCTION(Server, Reliable)
+    void Server_RequestFireHomingMissileAtTarget(AActor* TargetToShootAt);
 	
 	// --- Replication Notifiers (Called on Clients) ---
 protected:

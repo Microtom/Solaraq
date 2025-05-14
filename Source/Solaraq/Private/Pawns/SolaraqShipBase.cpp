@@ -333,46 +333,50 @@ void ASolaraqShipBase::ApplyVisualScale(float ScaleFactor)
     }
 }
 
-void ASolaraqShipBase::Server_RequestFireHomingMissile_Implementation()
+void ASolaraqShipBase::Server_RequestFireHomingMissileAtTarget_Implementation(AActor* TargetToShootAt)
 {
-    PerformFireHomingMissile();
+    // Basic validation on server
+    if (!TargetToShootAt || TargetToShootAt->IsPendingKillPending())
+    {
+        NET_LOG(LogSolaraqCombat, Warning, TEXT("Server received fire request with invalid target %s. Ignoring."), *GetNameSafe(TargetToShootAt));
+        return;
+    }
+    
+    PerformFireHomingMissile(TargetToShootAt); // Pass validated target
 }
 
-void ASolaraqShipBase::PerformFireHomingMissile()
+void ASolaraqShipBase::PerformFireHomingMissile(AActor* HomingTarget) 
 {
     if (!HasAuthority() || IsDead() || !HomingProjectileClass) return;
 
     const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
     if (CurrentTime < LastHomingFireTime + HomingMissileFireRate)
     {
-        UE_LOG(LogSolaraqProjectile, Warning, TEXT("Homing missile cooldown active. Time remaining: %.2f"), (LastHomingFireTime + HomingMissileFireRate) - CurrentTime);
         return; // Cooldown
     }
 
-    if (!MuzzlePoint)
-    {
-        UE_LOG(LogSolaraqProjectile, Error, TEXT("%s PerformFireHomingMissile: MuzzlePoint is NULL!"), *GetName());
-        return;
-    }
+    if (!MuzzlePoint) { /* Error Log */ return; }
     UWorld* const World = GetWorld();
     if (!World) return;
 
-    AActor* HomingTarget = FindBestHomingTarget();
-    if (!HomingTarget)
+    // --- Target Check ---
+    if (!HomingTarget) // Check if the passed target is somehow null
     {
-        UE_LOG(LogSolaraqProjectile, Log, TEXT("%s PerformFireHomingMissile: No target found, missile not fired."), *GetName());
-        return; // Don't fire if no target
+        NET_LOG(LogSolaraqCombat, Error, TEXT("%s PerformFireHomingMissile called with NULL target!"), *GetName());
+        return;
     }
+    // Target is now passed in, so we use it directly.
 
+    // --- Spawning Logic (mostly the same) ---
     const FVector MuzzleLocation = MuzzlePoint->GetComponentLocation();
-    FVector AimDirection = (HomingTarget->GetActorLocation() - MuzzleLocation).GetSafeNormal();
-    if (AimDirection.IsNearlyZero()) AimDirection = GetActorForwardVector(); // Fallback if on top of target
-    const FRotator MuzzleRotation = AimDirection.Rotation(); // Aim towards target initially
+    const FRotator MuzzleRotation = MuzzlePoint->GetComponentRotation(); // Eject forward
 
     FActorSpawnParameters SpawnParams;
+    // ... (set owner, instigator, collision handling) ...
     SpawnParams.Owner = this;
-    SpawnParams.Instigator = this; // Or GetInstigator() if pawn is controlled by another pawn
+    SpawnParams.Instigator = this;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
 
     ASolaraqHomingProjectile* SpawnedMissile = World->SpawnActor<ASolaraqHomingProjectile>(
         HomingProjectileClass, MuzzleLocation, MuzzleRotation, SpawnParams
@@ -380,155 +384,27 @@ void ASolaraqShipBase::PerformFireHomingMissile()
 
     if (SpawnedMissile)
     {
-        SpawnedMissile->SetupHomingTarget(HomingTarget);
+        SpawnedMissile->SetupHomingTarget(HomingTarget); // Set the specific target
 
         UProjectileMovementComponent* ProjMoveComp = SpawnedMissile->GetProjectileMovement();
-        if (ProjMoveComp)
-        {
-            // If ProjMoveComp->InitialSpeed is set in BP, it will be used.
-            // Otherwise, or to override:
-            if (HomingMissileLaunchSpeed > 0.f)
-            {
-                ProjMoveComp->Velocity = AimDirection * HomingMissileLaunchSpeed;
-            }
-            // Ship's current velocity is usually not added to homing missiles,
-            // as they self-propel and guide.
+        // ... (Set initial velocity based on MuzzleForward * LaunchSpeed + ShipVelocity) ...
+        if(ProjMoveComp) {
+             const FVector MuzzleForward = MuzzleRotation.Vector();
+             const FVector ShipVelocity = CollisionAndPhysicsRoot ? CollisionAndPhysicsRoot->GetPhysicsLinearVelocity() : FVector::ZeroVector;
+             ProjMoveComp->Velocity = ShipVelocity + (MuzzleForward * HomingMissileLaunchSpeed);
+             ProjMoveComp->UpdateComponentVelocity();
         }
-        
-        UE_LOG(LogSolaraqCombat, Log, TEXT("%s Fired Homing Missile %s at %s"),
-            *GetName(), *SpawnedMissile->GetName(), *HomingTarget->GetName());
-        LastHomingFireTime = CurrentTime;
+
+
+        UE_LOG(LogSolaraqCombat, Log, TEXT("%s Fired Homing Missile %s at %s (Initial Vel: %s)"),
+            *GetName(), *SpawnedMissile->GetName(), *HomingTarget->GetName(), ProjMoveComp ? *ProjMoveComp->Velocity.ToString() : TEXT("N/A"));
+        LastHomingFireTime = CurrentTime; // Update cooldown time
     }
     else
     {
-        UE_LOG(LogSolaraqCombat, Error, TEXT("%s PerformFireHomingMissile: Failed to spawn HomingProjectile!"), *GetName());
+        UE_LOG(LogSolaraqProjectile, Error, TEXT("%s PerformFireHomingMissile: Failed to spawn HomingProjectile!"), *GetName());
     }
 }
-
-AActor* ASolaraqShipBase::FindBestHomingTarget() const
-{
-    UE_LOG(LogSolaraqProjectile, Warning, TEXT("FindBestHomingTarget called for %s."), *GetName());
-    
-    AActor* BestTarget = nullptr;
-    float MinScore = FLT_MAX; // Using a score, lower is better. Could be dist sq, or angle+dist.
-
-    const FVector SelfLocation = GetActorLocation();
-    const FVector SelfForward = GetActorForwardVector();
-    const float MaxRangeSq = FMath::Square(MaxHomingTargetRange);
-
-    UE_LOG(LogSolaraqProjectile, Warning, TEXT(" - SelfLocation: %s, SelfForward: %s, MaxRangeSq: %.0f"),
-        *SelfLocation.ToString(), *SelfForward.ToString(), MaxRangeSq);
-    
-/*
-    // If this ship is AI controlled, it might use its existing target
-    ASolaraqAIController* MyAIC = Cast<ASolaraqAIController>(GetController());
-    if (MyAIC && MyAIC->GetCurrentTargetActor().IsValid())
-    {
-        AActor* AITarget = MyAIC->GetCurrentTargetActor().Get();
-        if (AITarget && !AITarget->IsPendingKillPending())
-        {
-            float DistSqToAITarget = FVector::DistSquared(SelfLocation, AITarget->GetActorLocation());
-            if (DistSqToAITarget < MaxRangeSq)
-            {
-                 // UE_LOG(LogSolaraqCombat, Verbose, TEXT("%s (AI) firing homing at its current target %s"), *GetName(), *AITarget->GetName());
-                return AITarget; // AI uses its brain target if valid and in range
-            }
-        }
-    }*/
-
-    int32 IteratedActors = 0;
-    // Player or AI without specific target: Scan for a suitable target
-    for (TActorIterator<ASolaraqShipBase> It(GetWorld()); It; ++It)
-    {
-        
-        ASolaraqShipBase* PotentialTargetShip = *It;
-        IteratedActors++;
-        
-        if (!PotentialTargetShip)
-        {
-            UE_LOG(LogSolaraqProjectile, Warning, TEXT("   - Iteration %d: PotentialTargetShip is NULL. Skipping."), IteratedActors);
-            continue;
-        }
-        
-        UE_LOG(LogSolaraqProjectile, Warning, TEXT("   - Iteration %d: Checking PotentialTargetShip: %s"), IteratedActors, *PotentialTargetShip->GetName());
-
-        if (PotentialTargetShip == this)
-        {
-            UE_LOG(LogSolaraqProjectile, Warning, TEXT("     - Is self. Skipping."));
-            continue;
-        }
-
-        if (PotentialTargetShip->IsDead())
-        {
-            UE_LOG(LogSolaraqProjectile, Warning, TEXT("     - Is dead. Skipping."));
-            continue;
-        }
-        
-        if (!PotentialTargetShip || PotentialTargetShip == this || PotentialTargetShip->IsDead())
-        {
-            continue;
-        }
-
-        // Check team affiliation
-        ETeamAttitude::Type Attitude = GetTeamAttitudeTowards(*PotentialTargetShip);
-        UE_LOG(LogSolaraqProjectile, Warning, TEXT("     - Attitude towards %s: %s"), *PotentialTargetShip->GetName(), *UEnum::GetValueAsString(Attitude));
-
-        if (Attitude != ETeamAttitude::Hostile)
-        {
-            continue;
-        }
-
-        const FVector TargetLocation = PotentialTargetShip->GetActorLocation();
-        float DistSq = FVector::DistSquared(SelfLocation, TargetLocation);
-        UE_LOG(LogSolaraqProjectile, Warning, TEXT("       - TargetLocation: %s, DistSq: %.0f (MaxRangeSq: %.0f)"),
-                    *TargetLocation.ToString(), DistSq, MaxRangeSq);
-        
-        if (DistSq < MaxRangeSq) // Within overall max range
-        {
-            UE_LOG(LogSolaraqProjectile, Warning, TEXT("         - Within MaxHomingTargetRange."));
-            FVector DirectionToTarget = (TargetLocation - SelfLocation).GetSafeNormal();
-            float DotToTarget = FVector::DotProduct(SelfForward, DirectionToTarget);
-
-            UE_LOG(LogSolaraqProjectile, Warning, TEXT("         - DirectionToTarget: %s, DotToTarget: %.3f (Angle threshold > 0.5)"),
-                            *DirectionToTarget.ToString(), DotToTarget);
-            
-            // Prefer targets somewhat in front (e.g., >0 for 180 deg, >0.707 for 90 deg cone)
-            if (DotToTarget > 0.5f) // Example: roughly 120 degree forward cone
-            {
-                UE_LOG(LogSolaraqProjectile, Warning, TEXT("           - Within forward cone (DotToTarget > 0.5)."));
-                // Simple score: distance. Could be more complex (e.g., distance / dot product)
-                UE_LOG(LogSolaraqProjectile, Warning, TEXT("           - Current MinScore: %.0f, This Target's DistSq (Score): %.0f"), MinScore, DistSq);
-                
-                // Simple score: distance. Could be more complex (e.g., distance / dot product)
-                if (DistSq < MinScore)
-                {
-                    MinScore = DistSq;
-                    BestTarget = PotentialTargetShip;
-                    UE_LOG(LogSolaraqProjectile, Warning, TEXT("             - **** NEW BEST TARGET FOUND: %s (Score: %.0f) ****"), *BestTarget->GetName(), MinScore);
-                }
-                else
-                {
-                    UE_LOG(LogSolaraqProjectile, Warning, TEXT("             - Not better than current best target."));
-                }
-            }
-        }
-        else
-        {
-            UE_LOG(LogSolaraqProjectile, Warning, TEXT("         - Outside MaxHomingTargetRange. Skipping."));
-        }
-    }
-    
-    if (BestTarget)
-    {
-        // UE_LOG(LogSolaraqCombat, Verbose, TEXT("%s Found homing target: %s"), *GetName(), *BestTarget->GetName());
-    }
-    else
-    {
-        // UE_LOG(LogSolaraqCombat, Verbose, TEXT("%s No suitable homing target found."), *GetName());
-    }
-    return BestTarget;
-}
-
 
 // --- Input Processing ---
 

@@ -11,23 +11,23 @@
 /**
  * A specialized ship pawn class for AI-controlled enemies.
  * Inherits core functionality from SolaraqShipBase and adds
- * specific methods for AI control.
- */
-UCLASS()
-class SOLARAQ_API ASolaraqEnemyShip : public ASolaraqShipBase
-{
-	GENERATED_BODY()
-
-public:
-	ASolaraqEnemyShip(); // Constructor
-
-	/**
-	 * Instructs the ship to turn towards a specific world location.
-	 * Called by the AI Controller.
-	 * @param TargetLocation The world location to face.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Solaraq|AI|Control")
-	virtual void TurnTowards(const FVector& TargetLocation);
+                                  * specific methods for AI control.
+                                  */
+                                 UCLASS()
+                                 class SOLARAQ_API ASolaraqEnemyShip : public ASolaraqShipBase
+                                 {
+                                 	GENERATED_BODY()
+                                 
+                                 public:
+                                 	ASolaraqEnemyShip(); // Constructor
+                                 
+                                 	/**
+                                 	 * Instructs the ship to turn towards a specific world location.
+                                 	 * Called by the AI Controller.
+                                 	 * @param TargetLocation The world location to face.
+                                 	 */
+                                 	UFUNCTION(BlueprintCallable, Category = "Solaraq|AI|Control")
+                                 	virtual void TurnTowards(const FVector& TargetLocation);
 
 	/**
 	 * Instructs the ship to fire its primary weapon(s).

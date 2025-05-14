@@ -141,7 +141,7 @@ void ASolaraqAIController::Tick(float DeltaTime)
         // Clear state if pawn died or is invalid
         if (CurrentTargetActor.IsValid() || bHasLineOfSight || bIsPerformingBoostTurn)
         {
-            UE_LOG(LogSolaraqAI, Warning, TEXT("%s Tick: Controlled Ship Invalid/Dead. Clearing state."), *GetName());
+            //UE_LOG(LogSolaraqAI, Warning, TEXT("%s Tick: Controlled Ship Invalid/Dead. Clearing state."), *GetName());
             CurrentTargetActor = nullptr;
             bHasLineOfSight = false;
             bIsPerformingBoostTurn = false;
@@ -161,11 +161,11 @@ void ASolaraqAIController::Tick(float DeltaTime)
     const FVector ShipVelocity = ControlledEnemyShip->GetCollisionAndPhysicsRoot() ? ControlledEnemyShip->GetCollisionAndPhysicsRoot()->GetPhysicsLinearVelocity() : FVector::ZeroVector;
 
     // --- High-Visibility Log: State at Start of Tick ---
-    UE_LOG(LogSolaraqAI, Log, TEXT("%s TICK CHECK ----> Target: [%s], HasLoS: [%d], BoostTurning: [%d]"),
+    /*UE_LOG(LogSolaraqAI, Log, TEXT("%s TICK CHECK ----> Target: [%s], HasLoS: [%d], BoostTurning: [%d]"),
            *GetName(),
            *GetNameSafe(CurrentTargetActor.Get()), // Use GetNameSafe for TWeakObjectPtr
            bHasLineOfSight,
-           bIsPerformingBoostTurn);
+           bIsPerformingBoostTurn);*/
 
 
     // --- Core AI Logic Loop ---
@@ -184,7 +184,7 @@ void ASolaraqAIController::Tick(float DeltaTime)
         // Note: DogfightRange is a member variable (UPROPERTY) and should be accessible here
         if (!bIsPerformingBoostTurn && AngleToTarget > ReversalAngleThreshold)
         {
-            UE_LOG(LogSolaraqAI, Error, TEXT("%s Tick State: === STARTING BOOST TURN (Angle: %.1f > %.1f) ==="), *GetName(), AngleToTarget, ReversalAngleThreshold);
+            //UE_LOG(LogSolaraqAI, Error, TEXT("%s Tick State: === STARTING BOOST TURN (Angle: %.1f > %.1f) ==="), *GetName(), AngleToTarget, ReversalAngleThreshold);
             bIsPerformingBoostTurn = true;
             ExecuteReversalTurnMovement(TargetLocation, AngleToTarget, DeltaTime); // Pass calculated values
             CurrentDogfightState = EDogfightState::OffsetApproach; // Reset dogfight state if boosting
@@ -192,7 +192,7 @@ void ASolaraqAIController::Tick(float DeltaTime)
         }
         else if (bIsPerformingBoostTurn)
         {
-             UE_LOG(LogSolaraqAI, Error, TEXT("%s Tick State: === CONTINUING BOOST TURN (Angle: %.1f) ==="), *GetName(), AngleToTarget);
+             //UE_LOG(LogSolaraqAI, Error, TEXT("%s Tick State: === CONTINUING BOOST TURN (Angle: %.1f) ==="), *GetName(), AngleToTarget);
             ExecuteReversalTurnMovement(TargetLocation, AngleToTarget, DeltaTime); // Pass calculated values
         }
         else if (DistanceToTarget <= DogfightRange) // Check Dogfight Range (Uses member variable)
@@ -202,7 +202,7 @@ void ASolaraqAIController::Tick(float DeltaTime)
         }
         else // Default to Chasing
         {
-             UE_LOG(LogSolaraqAI, Error, TEXT("%s Tick State: === CHASING [%s] (Dist: %.0f > %.0f) ==="), *GetName(), *Target->GetName(), DistanceToTarget, DogfightRange);
+             //UE_LOG(LogSolaraqAI, Error, TEXT("%s Tick State: === CHASING [%s] (Dist: %.0f > %.0f) ==="), *GetName(), *Target->GetName(), DistanceToTarget, DogfightRange);
              ExecuteChaseMovement(TargetLocation, DeltaTime); // Pass calculated value
              CurrentDogfightState = EDogfightState::OffsetApproach; // Reset dogfight state if chasing
              TimeInCurrentDogfightState = 0.0f;
@@ -241,7 +241,7 @@ void ASolaraqAIController::Tick(float DeltaTime)
     } // End of if (Target && bHasLineOfSight)
     else if (Target && !bHasLineOfSight) // Had target, but lost LoS
     {
-        UE_LOG(LogSolaraqAI, Warning, TEXT("%s Tick State: === SEARCHING for [%s] (Lost LoS) ==="), *GetName(), *Target->GetName());
+        //UE_LOG(LogSolaraqAI, Warning, TEXT("%s Tick State: === SEARCHING for [%s] (Lost LoS) ==="), *GetName(), *Target->GetName());
         ControlledEnemyShip->TurnTowards(LastKnownTargetLocation);
         ExecuteIdleMovement();
         bIsPerformingBoostTurn = false;
@@ -252,7 +252,7 @@ void ASolaraqAIController::Tick(float DeltaTime)
     }
     else // No Target
     {
-         UE_LOG(LogSolaraqAI, Log, TEXT("%s Tick State: === IDLE ==="), *GetName());
+         //UE_LOG(LogSolaraqAI, Log, TEXT("%s Tick State: === IDLE ==="), *GetName());
         ExecuteIdleMovement();
         bIsPerformingBoostTurn = false;
          // Reset dogfight state if no target
