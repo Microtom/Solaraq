@@ -9,7 +9,11 @@ ASolaraqEnemyShip::ASolaraqEnemyShip()
 {
     // Constructor code if needed (e.g., setting default values different from base)
     ////UE_LOG(LogSolaraqAI, Warning, TEXT("ASolaraqEnemyShip %s Constructed"), *GetName());
-     FireRate = FMath::RandRange(0.4f, 0.8f); // Example: Randomize fire rate slightly per instance
+     FireRate = FMath::RandRange(0.1f, 0.2f); // Example: Randomize fire rate slightly per instance
+     SpecificAITurnRate = 110.0f; // Default AI turn rate, can be adjusted in BP
+
+    ThrustForce = 2800000.0f;       // e.g., Double the base thrust
+    NormalMaxSpeed = 4000.0f;  
 }
 
 void ASolaraqEnemyShip::BeginPlay()
@@ -103,65 +107,59 @@ void ASolaraqEnemyShip::HandleDestruction()
 }
 
 
-void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation)
+void ASolaraqEnemyShip::TurnTowards(const FVector& TargetLocation, float DeltaTime)
 {
     // Needs to only run on the server as rotation is replicated.
-    if (!HasAuthority()) return;
-    if (!CollisionAndPhysicsRoot || IsDead() || !CollisionAndPhysicsRoot->IsSimulatingPhysics()) return;
+    if (!HasAuthority() || IsDead() || DeltaTime <= KINDA_SMALL_NUMBER) // KINDA_SMALL_NUMBER to avoid issues with zero or negative delta time
+    {
+        return;
+    }
 
     const FVector CurrentLocation = GetActorLocation();
     const FVector DirectionToTarget = (TargetLocation - CurrentLocation).GetSafeNormal();
-    if (DirectionToTarget.IsNearlyZero()) return;
 
-    FRotator TargetRotation = DirectionToTarget.Rotation();
-    FRotator CurrentRotation = CollisionAndPhysicsRoot->GetComponentRotation(); // Use physics rotation
-
-    ////UE_LOG(LogSolaraqAI, Warning, TEXT("TurnTowards --- CurrentRot(Physics): %s, TargetRot(World): %s"), *CurrentRotation.ToString(), *TargetRotation.ToString()); // Optional Log
-
-    float CurrentYaw = CurrentRotation.Yaw;
-    float TargetYaw = TargetRotation.Yaw;
-    float YawDifference = FMath::FindDeltaAngleDegrees(CurrentYaw, TargetYaw);
-
-    // --- Stop applying torque when very close to the target angle ---
-    // Tune this threshold (degrees) - Start maybe a bit higher like 2.0 or 3.0
-    if (FMath::Abs(YawDifference) < 2.0f)
+    if (DirectionToTarget.IsNearlyZero())
     {
-        // Optionally reduce/zero out angular velocity when very close to target angle
-        FVector CurrentAngularVel = CollisionAndPhysicsRoot->GetPhysicsAngularVelocityInDegrees();
-        if(FMath::Abs(CurrentAngularVel.Z) > 1.0f) // Only dampen if spinning significantly
-        {
-            // Apply damping faster when close to target
-            CollisionAndPhysicsRoot->SetPhysicsAngularVelocityInDegrees(FVector(CurrentAngularVel.X, CurrentAngularVel.Y, CurrentAngularVel.Z * 0.5f));
-            ////UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f). Applying damping to AngVelZ: %.2f"), *GetName(), YawDifference, CurrentAngularVel.Z * 0.5f);
-        }
-        else {
-             ////UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: Yaw difference small (%.2f) and AngVelZ low. No torque/damping."), *GetName(), YawDifference);
-        }
-        return; // Don't apply positive torque if already aligned
+        // Already at target or invalid direction.
+        // No turning needed. If physics were active and spinning the ship,
+        // you might want to explicitly stop angular velocity here.
+        // Since we're setting rotation directly, this isn't strictly necessary
+        // unless an external physics force is still acting on it.
+        return;
     }
 
-    // --- Torque Calculation ---
-    // Start with the MaxTurnTorque value that was previously causing overshoot
-    float MaxTurnTorque = 3000.0f; // <<< YOUR PREVIOUSLY TUNED VALUE (The one that was too fast)
-    float TurnDirection = FMath::Sign(YawDifference);
+    FRotator CurrentActorRotation = GetActorRotation();
+    FRotator TargetWorldRotation = DirectionToTarget.Rotation();
 
-    // --- Proportional Torque Calculation ---
-    // Angle (degrees) at which to start reducing torque. Tune this value!
-    // Start larger (e.g., 90) and decrease if it still overshoots.
-    float SlowdownAngle = 90.0f; // <<< TUNABLE (Try 180, 90, 60, 45, 30...)
-    // Minimum factor prevents zero torque when far from target. Tune if needed (0.05 - 0.2 range usually ok)
-    float MinTorqueFactor = 0.5f; // <<< TUNABLE
+    // We are in a 2.5D space game, so we only care about Yaw.
+    // Pitch and Roll should be maintained (or set to 0 if ship should always be flat).
+    // The base ship has physics constraints to lock X and Y rotation (Pitch and Roll).
+    // So, we'll make the desired rotation only affect Yaw.
+    FRotator DesiredRotation = FRotator(0.f, TargetWorldRotation.Yaw, 0.f); // Keep Pitch and Roll at 0.
 
-    // Calculate scaling factor: 1.0 when angle diff >= SlowdownAngle, decreasing linearly to MinTorqueFactor.
-    float TorqueFactor = FMath::Clamp(FMath::Abs(YawDifference) / SlowdownAngle, MinTorqueFactor, 1.0f);
-    float TorqueMagnitude = MaxTurnTorque * TorqueFactor;
-    // --- End Proportional Torque ---
+    // Determine the turn rate to use
+    float RotationRateToUse = SpecificAITurnRate;
+    if (RotationRateToUse <= 0.f) // Fallback to base class TurnSpeed if SpecificAITurnRate is not set or invalid
+    {
+        RotationRateToUse = TurnSpeed; // Assumes GetTurnSpeed() is accessible and returns degrees/second
+    }
 
-    FVector TorqueToApply = FVector(0.f, 0.f, TurnDirection * TorqueMagnitude);
-    // Keep AccelChange=true for now unless you have specific reasons to use mass
-    CollisionAndPhysicsRoot->AddTorqueInDegrees(TorqueToApply, NAME_None, true);
+    // Interpolate the current rotation towards the desired rotation at a constant rate.
+    FRotator NewRotation = FMath::RInterpConstantTo(CurrentActorRotation, DesiredRotation, DeltaTime, RotationRateToUse);
 
-    ////UE_LOG(LogSolaraqAI, Warning, TEXT("%s TurnTowards: YawDiff: %.2f, Factor: %.2f, Applying Torque: %.2f"), *GetName(), YawDifference, TorqueFactor, TorqueToApply.Z);
+    // Set the new actor rotation.
+    // SetActorRotation directly manipulates the transform.
+    // If the root component is simulating physics, this can sometimes be fought by the physics engine.
+    // Using ETeleportType::TeleportPhysics can help by resetting the physics state to the new transform.
+    // However, for simple yaw on a constrained body, direct SetActorRotation might be sufficient.
+    // Let's try without TeleportPhysics first.
+    SetActorRotation(NewRotation);
+
+    // Optional Log
+    /*
+    UE_LOG(LogSolaraqAI, Log, TEXT("%s TurnTowards (Transform): CurrentYaw: %.1f, TargetYaw: %.1f, NewYaw: %.1f, Rate: %.1f Dt: %.3f"),
+           *GetName(), CurrentActorRotation.Yaw, DesiredRotation.Yaw, NewRotation.Yaw, RotationRateToUse, DeltaTime);
+    */
 }
 
 void ASolaraqEnemyShip::FireWeapon()
