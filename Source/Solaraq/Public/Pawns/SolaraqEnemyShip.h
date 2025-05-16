@@ -27,8 +27,12 @@
                                  	 * @param TargetLocation The world location to face.
                                  	 */
                                  	UFUNCTION(BlueprintCallable, Category = "Solaraq|AI|Control")
-                                 	virtual void TurnTowards(const FVector& TargetLocation);
+                                 	void TurnTowards(const FVector& TargetLocation, float DeltaTime);
 
+                                 	/** Specific turn rate for this AI ship in degrees per second. If <= 0, will use TurnSpeed from base class. */
+                                 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI|Movement", meta = (ClampMin = "0.0"))
+                                 	float SpecificAITurnRate = 110.0f;
+                                 	
 	/**
 	 * Instructs the ship to fire its primary weapon(s).
 	 * Called by the AI Controller.

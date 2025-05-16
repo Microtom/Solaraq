@@ -9,7 +9,7 @@
 #include "GenericTeamAgentInterface.h"
 #include "Logging/SolaraqLogChannels.h" // Your custom log channel
 #include "Kismet/GameplayStatics.h" // For getting player pawn potentially
-#include "AI/SolaraqAIController.h"
+// #include "AI/SolaraqAIController.h" // Already included above
 #include "Pawns/SolaraqEnemyShip.h"
 #include "Components/SphereComponent.h"
 
@@ -223,26 +223,27 @@ void ASolaraqAIController::Tick(float DeltaTime)
              {
                  bShouldAimAndFire = false;
              }
-             // Aiming itself (TurnTowards) during Engage will be handled within HandleEngage if needed,
-             // OR keep it in Tick's common logic block. Let's keep it common for now.
-
+             
              if (bShouldAimAndFire)
              {
-                 ControlledEnemyShip->TurnTowards(PredictedAimLocation);
+                 ControlledEnemyShip->TurnTowards(PredictedAimLocation, DeltaTime); // MODIFIED: Pass DeltaTime
                  FVector DirectionToAim = (PredictedAimLocation - ShipLocation).GetSafeNormal();
                  float AimDotProduct = FVector::DotProduct(ShipForward, DirectionToAim);
-                 if (AimDotProduct > 0.98f)
+                 if (AimDotProduct > 0.98f) // Firing threshold
                  {
                      ControlledEnemyShip->FireWeapon();
                  }
              }
+             // If not bShouldAimAndFire, but still in combat (e.g. OffsetApproach, Reposition),
+             // the ship might still need to turn towards its movement target point.
+             // This is handled within those respective state functions (HandleOffsetApproach, HandleReposition).
          }
 
     } // End of if (Target && bHasLineOfSight)
     else if (Target && !bHasLineOfSight) // Had target, but lost LoS
     {
         //UE_LOG(LogSolaraqAI, Warning, TEXT("%s Tick State: === SEARCHING for [%s] (Lost LoS) ==="), *GetName(), *Target->GetName());
-        ControlledEnemyShip->TurnTowards(LastKnownTargetLocation);
+        ControlledEnemyShip->TurnTowards(LastKnownTargetLocation, DeltaTime); // MODIFIED: Pass DeltaTime
         ExecuteIdleMovement();
         bIsPerformingBoostTurn = false;
         if(ControlledEnemyShip->IsBoosting()) ControlledEnemyShip->Server_SetAttemptingBoost(false);
@@ -253,7 +254,7 @@ void ASolaraqAIController::Tick(float DeltaTime)
     else // No Target
     {
          //UE_LOG(LogSolaraqAI, Log, TEXT("%s Tick State: === IDLE ==="), *GetName());
-        ExecuteIdleMovement();
+        ExecuteIdleMovement(); // This stops forward movement. Turning stops if no target.
         bIsPerformingBoostTurn = false;
          // Reset dogfight state if no target
         CurrentDogfightState = EDogfightState::OffsetApproach;
@@ -383,8 +384,8 @@ void ASolaraqAIController::ExecuteIdleMovement()
     if (ControlledEnemyShip)
     {
         ControlledEnemyShip->RequestMoveForward(0.0f);
-        // No explicit turn command needed, TurnTowards handles turning to target if one exists
-        // If truly idle, stopping TurnTowards might be needed if you want it to drift straight
+        // No explicit turn command needed for idle.
+        // If TurnTowards were called with no valid target or current location, it would do nothing.
     }
 }
 
@@ -394,7 +395,10 @@ void ASolaraqAIController::ExecuteChaseMovement(const FVector& TargetLocation, f
     {
         // Move full speed towards the target
         ControlledEnemyShip->RequestMoveForward(1.0f);
-        // Turning is handled by the main Tick logic aiming at PredictedAimLocation
+        // Turning towards PredictedAimLocation is handled by the main Tick's common aiming logic.
+        // If chase needs to aim directly at TargetLocation (not PredictedAimLocation),
+        // then add: ControlledEnemyShip->TurnTowards(TargetLocation, DeltaTime);
+        // But generally, even when chasing, you want to aim where the target *will be* for firing.
     }
 }
 
@@ -413,8 +417,10 @@ void ASolaraqAIController::ExecuteDogfightMovement(AActor* Target, float DeltaTi
     case EDogfightState::OffsetApproach:
         HandleOffsetApproach(Target, DeltaTime);
         break;
-    case EDogfightState::DriftAim:
-        HandleEngage(Target, DeltaTime);
+    case EDogfightState::DriftAim: // Renamed to Engage in some places, let's stick to one. Let's say Engage.
+                                   // Make sure EDogfightState enum reflects this if changed.
+                                   // Assuming it's still DriftAim for now as per the switch.
+        HandleEngage(Target, DeltaTime); // Assuming DriftAim is now Engage
         break;
     case EDogfightState::Reposition:
         HandleReposition(Target, DeltaTime);
@@ -427,216 +433,159 @@ void ASolaraqAIController::ExecuteReversalTurnMovement(const FVector& TargetLoca
 {
     if (ControlledEnemyShip)
     {
-        // 1. Activate Boost <<<< REMOVE THIS SECTION >>>>
-        /*
-        if (!ControlledEnemyShip->IsBoosting())
-        {
-            UE_LOG(LogSolaraqAI, Warning, TEXT("%s BoostTurn: Activating Boost!"), *GetName());
-            ControlledEnemyShip->Server_SetAttemptingBoost(true);
-        }
-        */
-        // <<<< END OF REMOVAL >>>>
+        // 1. Activate Boost (This part was removed in thought process, let's ensure it stays out or is re-evaluated)
+        // For a sharp reversal, boost might be desired. If so, it should be managed here.
+        // If not, ensure boost is OFF or not activated.
+        // Current code has boost activation commented out.
 
+        // 2. Turn Towards Target (which is behind)
+        ControlledEnemyShip->TurnTowards(TargetLocation, DeltaTime); // MODIFIED: Pass DeltaTime
 
-        // 2. Turn Towards Target (which is behind) - KEEP
-        ControlledEnemyShip->TurnTowards(TargetLocation); // Continue turning aggressively
-
-        // 3. Stop Forward Thrust - KEEP
+        // 3. Stop Forward Thrust
         ControlledEnemyShip->RequestMoveForward(0.0f); // Stop forward movement during turn
 
-        // 4. Check if Turn is Complete - KEEP
-        // Use BoostTurnCompletionAngle or rename the variable if desired
-        if (AngleToTarget < BoostTurnCompletionAngle)
+        // 4. Check if Turn is Complete
+        if (AngleToTarget < BoostTurnCompletionAngle) // Uses existing completion angle
         {
             UE_LOG(LogSolaraqAI, Warning, TEXT("%s ReversalTurn: Turn Complete (Angle: %.1f < %.1f)."), *GetName(), AngleToTarget, BoostTurnCompletionAngle);
-            // ControlledEnemyShip->Server_SetAttemptingBoost(false); // No longer need to stop boost here
-            bIsPerformingBoostTurn = false; // Exit reversal turn state (or use bIsPerformingReversalTurn)
+            bIsPerformingBoostTurn = false; 
+            // If boost was activated for the turn, ensure it's turned off here.
+            // ControlledEnemyShip->Server_SetAttemptingBoost(false); 
         }
         else
         {
             UE_LOG(LogSolaraqAI, Log, TEXT("%s ReversalTurn: Turning... (Angle: %.1f / %.1f)"), *GetName(), AngleToTarget, BoostTurnCompletionAngle);
         }
     }
-    else // Ship became invalid during turn?
+    else 
     {
-        bIsPerformingBoostTurn = false; // or bIsPerformingReversalTurn
+        bIsPerformingBoostTurn = false; 
     }
 }
 
 void ASolaraqAIController::HandleOffsetApproach(AActor* Target, float DeltaTime)
 {
     // --- Initial Checks ---
-    // Ensure the controlled ship and the target are valid.
     if (!ControlledEnemyShip || !Target)
     {
-        // Log an error or warning if pointers are invalid, helps debugging.
         UE_LOG(LogSolaraqAI, Error, TEXT("%s HandleOffsetApproach: Invalid ControlledEnemyShip or Target!"), *GetName());
-        // Potentially transition to IDLE or SEARCHING if target is invalid?
-        // For now, just returning prevents crashes.
         return;
     }
 
     // --- Post-Reposition Boost Logic ---
-    // Check if we should be boosting because we just finished repositioning.
     if (bShouldBoostOnNextApproach)
     {
-        // Activate boost only on the very first frame entering this state after repositioning.
-        // TimeInCurrentDogfightState should be <= DeltaTime on the first frame.
-        if (TimeInCurrentDogfightState <= DeltaTime)
+        if (TimeInCurrentDogfightState <= DeltaTime) // First frame
         {
             UE_LOG(LogSolaraqAI, Warning, TEXT("%s Dogfight: OffsetApproach - Activating Post-Reposition Boost!"), *GetName());
-            // Send command to the ship pawn to start boosting.
             ControlledEnemyShip->Server_SetAttemptingBoost(true);
         }
 
-        // Define how long the boost should last during this approach phase.
-        // Example: Boost for half the total approach duration. Tune this value.
         const float BoostDuration = OffsetApproachDuration * 0.5f;
-
-        // Check if the boost duration has elapsed.
         if (TimeInCurrentDogfightState > BoostDuration)
         {
             UE_LOG(LogSolaraqAI, Warning, TEXT("%s Dogfight: OffsetApproach - Stopping Post-Reposition Boost (Duration %.2f > %.2f)"),
                    *GetName(), TimeInCurrentDogfightState, BoostDuration);
-            // Send command to the ship pawn to stop boosting.
             ControlledEnemyShip->Server_SetAttemptingBoost(false);
-            // Clear the flag so we don't try to boost again until after the next reposition.
             bShouldBoostOnNextApproach = false;
         }
     }
     // --- End Boost Logic ---
 
-    // --- Calculate Offset Target Point ---
     const FVector ShipLocation = ControlledEnemyShip->GetActorLocation();
     const FVector TargetLocation = Target->GetActorLocation();
     FVector DirectionToTarget = (TargetLocation - ShipLocation).GetSafeNormal();
 
-    // Decide which side to offset to (left or right) only when first entering the state.
-    // This prevents flipping the offset side mid-approach.
-    if (TimeInCurrentDogfightState <= DeltaTime) // First frame check
+    if (TimeInCurrentDogfightState <= DeltaTime) 
     {
-        // Randomly choose -1 (left) or 1 (right).
         CurrentOffsetSide = (FMath::RandBool()) ? 1 : -1;
         UE_LOG(LogSolaraqAI, Log, TEXT("%s Dogfight: Entering OffsetApproach, OffsetSide = %d"), *GetName(), CurrentOffsetSide);
     }
 
-    // Calculate the direction perpendicular to the target direction (using cross product with UpVector for top-down).
-    // Ensure it's normalized.
     FVector OffsetDirection = FVector::CrossProduct(DirectionToTarget, FVector::UpVector).GetSafeNormal() * CurrentOffsetSide;
-    if (OffsetDirection.IsNearlyZero()) // Safety check if target is directly above/below
+    if (OffsetDirection.IsNearlyZero()) 
     {
-        // If direction to target is vertical, use ship's right vector as a fallback offset direction
         OffsetDirection = ControlledEnemyShip->GetActorRightVector() * CurrentOffsetSide;
         UE_LOG(LogSolaraqAI, Warning, TEXT("%s HandleOffsetApproach: Target directly above/below? Using ship's RightVector for offset."), *GetName());
     }
-
-
-    // Calculate the actual world-space point the AI should move towards.
-    // This point is offset from the target's current location.
+    
     CurrentMovementTargetPoint = TargetLocation + (OffsetDirection * DogfightOffsetDistance);
 
     // --- Movement Execution ---
-    // Turn the ship to face the calculated movement target point (the offset point).
-    ControlledEnemyShip->TurnTowards(CurrentMovementTargetPoint);
-    // Command the ship to apply full forward thrust.
+    ControlledEnemyShip->TurnTowards(CurrentMovementTargetPoint, DeltaTime); // MODIFIED: Pass DeltaTime
     ControlledEnemyShip->RequestMoveForward(1.0f);
 
-    // Log the target point for debugging.
     UE_LOG(LogSolaraqAI, Log, TEXT("%s Dogfight: OffsetApproach - Moving towards %s"), *GetName(), *CurrentMovementTargetPoint.ToString());
 
     // --- State Transition Logic ---
-    // Check if the allocated time for this approach phase has elapsed.
     if (TimeInCurrentDogfightState >= OffsetApproachDuration)
     {
-        // Before transitioning, ensure the boost is turned off if the flag was somehow still active
-        // (e.g., if OffsetApproachDuration was shorter than the calculated BoostDuration).
         if (bShouldBoostOnNextApproach)
         {
             UE_LOG(LogSolaraqAI, Warning, TEXT("%s Dogfight: OffsetApproach - State duration ended, ensuring boost is off."), *GetName());
             ControlledEnemyShip->Server_SetAttemptingBoost(false);
-            bShouldBoostOnNextApproach = false; // Clear the flag definitively
+            bShouldBoostOnNextApproach = false; 
         }
-
-        // Log the state transition.
         UE_LOG(LogSolaraqAI, Warning, TEXT("%s Dogfight: Transition -> DriftAim (OffsetApproach Duration Ended)"), *GetName());
-        // Switch to the next state.
-        CurrentDogfightState = EDogfightState::DriftAim;
-        // Reset the timer for the new state.
+        CurrentDogfightState = EDogfightState::DriftAim; // Or Engage
         TimeInCurrentDogfightState = 0.0f;
     }
 }
 
-void ASolaraqAIController::HandleEngage(AActor* Target, float DeltaTime)
+void ASolaraqAIController::HandleEngage(AActor* Target, float DeltaTime) // Assuming DriftAim is now Engage
 {
-    // --- Initial Checks ---
     if (!ControlledEnemyShip || !Target || !ControlledEnemyShip->GetCollisionAndPhysicsRoot())
     {
         UE_LOG(LogSolaraqAI, Error, TEXT("%s HandleEngage: Invalid ControlledEnemyShip, Target, or PhysicsRoot!"), *GetName());
-        return; // Or transition to IDLE/SEARCH?
+        return; 
     }
 
-    // --- Get Current State Info ---
     const FVector ShipLocation = ControlledEnemyShip->GetActorLocation();
     const FVector TargetLocation = Target->GetActorLocation();
     FVector DirectionToTarget = (TargetLocation - ShipLocation).GetSafeNormal();
     FVector ShipVelocity = ControlledEnemyShip->GetCollisionAndPhysicsRoot()->GetPhysicsLinearVelocity();
     float CurrentSpeed = ShipVelocity.Size();
 
-    // --- Movement ---
-    // Apply PARTIAL forward thrust consistently to maintain speed
-    ControlledEnemyShip->RequestMoveForward(EngageForwardThrustScale); // Use the new parameter
+    ControlledEnemyShip->RequestMoveForward(EngageForwardThrustScale); 
 
-    // Aiming (TurnTowards) is handled by the main Tick loop's common logic block
-    // based on PredictedAimLocation when bShouldAimAndFire is true.
+    // Aiming (TurnTowards PredictedAimLocation) is handled by the main Tick loop's common logic.
+    // No need to call TurnTowards here unless Engage has a *different* turning target.
     // Firing is also handled by the main Tick loop.
 
     UE_LOG(LogSolaraqAI, Log, TEXT("%s Dogfight: Engage - Thrust Scale: %.2f, Speed: %.0f, Aiming/Firing Enabled"),
         *GetName(), EngageForwardThrustScale, CurrentSpeed);
 
-    // --- State Transition Logic ---
     bool bTransitionState = false;
-    EDogfightState NextState = EDogfightState::Reposition; // Default transition from Engage is usually Reposition
+    EDogfightState NextState = EDogfightState::Reposition; 
     FString TransitionReason = "";
 
-    // Reason 1: Angle between velocity and target is too wide
-    // Check only if moving significantly to avoid spurious transitions at low speed
-    if (CurrentSpeed > 100.0f) // Use a threshold slightly above zero
+    if (CurrentSpeed > 100.0f) 
     {
         FVector VelocityDirection = ShipVelocity.GetSafeNormal();
-        // Ensure DirectionToTarget is also normalized (should be, but safety check)
         if (!DirectionToTarget.IsNormalized()) DirectionToTarget.Normalize();
 
         float DotProduct = FVector::DotProduct(VelocityDirection, DirectionToTarget);
-        DotProduct = FMath::Clamp(DotProduct, -1.0f, 1.0f); // Clamp for safety before Acos
+        DotProduct = FMath::Clamp(DotProduct, -1.0f, 1.0f); 
         float AngleRad = FMath::Acos(DotProduct);
         float AngleDeg = FMath::RadiansToDegrees(AngleRad);
 
         UE_LOG(LogSolaraqAI, Verbose, TEXT("%s Dogfight: Engage - Angle Check: VelDir vs TargetDir = %.1f deg"), *GetName(), AngleDeg);
 
-        // Use the same threshold name 'DriftAimAngleThreshold' or rename it to 'EngageAngleThreshold'
-        if (AngleDeg > DriftAimAngleThreshold)
+        // Using DriftAimAngleThreshold, ensure this UPROPERTY exists or rename if needed.
+        if (AngleDeg > DriftAimAngleThreshold) 
         {
             bTransitionState = true;
-            NextState = EDogfightState::Reposition; // Bad angle triggers reposition
+            NextState = EDogfightState::Reposition; 
             TransitionReason = FString::Printf(TEXT("Engage Angle Too Wide (%.1f > %.1f)"), AngleDeg, DriftAimAngleThreshold);
         }
     }
-    // Reason 2 (Optional Failsafe): Speed *still* dropped too low despite thrust?
-    /* else if (CurrentSpeed < MinDriftSpeedThreshold * 0.5f) // Use a lower threshold here maybe
-    {
-         bTransitionState = true;
-         NextState = EDogfightState::OffsetApproach; // Try to recover speed
-         TransitionReason = FString::Printf(TEXT("Speed Critically Low (%.0f)"), CurrentSpeed);
-    } */
-
-
-    // --- Perform Transition if Needed ---
+    
     if (bTransitionState)
     {
          UE_LOG(LogSolaraqAI, Warning, TEXT("%s Dogfight: Transition -> %s (%s)"),
                 *GetName(), *UEnum::GetValueAsString(NextState), *TransitionReason);
          CurrentDogfightState = NextState;
-         TimeInCurrentDogfightState = 0.0f; // Reset timer for the new state
+         TimeInCurrentDogfightState = 0.0f; 
     }
 }
 
@@ -647,52 +596,41 @@ void ASolaraqAIController::HandleReposition(AActor* Target, float DeltaTime)
     const FVector ShipLocation = ControlledEnemyShip->GetActorLocation();
     const FVector TargetLocation = Target->GetActorLocation();
 
-    // Calculate direction *away* from the target
     FVector DirectionAway = (ShipLocation - TargetLocation).GetSafeNormal();
-    if (DirectionAway.IsNearlyZero()) // If directly on top, pick an arbitrary away direction
+    if (DirectionAway.IsNearlyZero()) 
     {
-        DirectionAway = ControlledEnemyShip->GetActorForwardVector() * -1.0f; // Move backwards
+        DirectionAway = ControlledEnemyShip->GetActorForwardVector() * -1.0f; 
     }
+    
+    CurrentMovementTargetPoint = ShipLocation + (DirectionAway * RepositionDistance); 
 
-    // Calculate the point to move towards
-    CurrentMovementTargetPoint = ShipLocation + (DirectionAway * RepositionDistance); // Move RepositionDistance units away
-
-
-    // --- Movement ---
-    // Face the direction we want to move (away)
-    ControlledEnemyShip->TurnTowards(CurrentMovementTargetPoint);
-    // Apply full forward thrust
+    ControlledEnemyShip->TurnTowards(CurrentMovementTargetPoint, DeltaTime); // MODIFIED: Pass DeltaTime
     ControlledEnemyShip->RequestMoveForward(1.0f);
 
     UE_LOG(LogSolaraqAI, Log, TEXT("%s Dogfight: Reposition - Moving towards %s"), *GetName(), *CurrentMovementTargetPoint.ToString());
 
-
-    // --- State Transition ---
     if (TimeInCurrentDogfightState >= RepositionDuration)
     {
         UE_LOG(LogSolaraqAI, Warning, TEXT("%s Dogfight: Transition -> OffsetApproach (Reposition Duration Ended). Requesting Boost."), *GetName());
         CurrentDogfightState = EDogfightState::OffsetApproach;
-        TimeInCurrentDogfightState = 0.0f; // Reset timer for next state
-        bShouldBoostOnNextApproach = true; // **** SET THE FLAG ****
+        TimeInCurrentDogfightState = 0.0f; 
+        bShouldBoostOnNextApproach = true; 
     }
 }
 
 float ASolaraqAIController::GetAngleToTarget(const FVector& TargetLocation) const
 {
-    if (!ControlledEnemyShip) return 180.0f; // Invalid state
+    if (!ControlledEnemyShip) return 180.0f; 
 
     FVector DirectionToTarget = (TargetLocation - ControlledEnemyShip->GetActorLocation()).GetSafeNormal();
     FVector ShipForward = ControlledEnemyShip->GetActorForwardVector();
 
-    // Ensure vectors are normalized
     if (!DirectionToTarget.IsNormalized()) DirectionToTarget.Normalize();
     if (!ShipForward.IsNormalized()) ShipForward.Normalize();
 
-    // Calculate dot product (cosine of angle)
     float Dot = FVector::DotProduct(ShipForward, DirectionToTarget);
-    Dot = FMath::Clamp(Dot, -1.0f, 1.0f); // Clamp for safety
+    Dot = FMath::Clamp(Dot, -1.0f, 1.0f); 
 
-    // Get angle in degrees
     float AngleRad = FMath::Acos(Dot);
     return FMath::RadiansToDegrees(AngleRad);
 }
