@@ -1,5 +1,3 @@
-// --- START OF FILE SolaraqShipBase.h ---
-
 // SolaraqShipBase.h
 
 #pragma once
@@ -7,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "GenericTeamAgentInterface.h"
-//#include "Components/DockingPadComponent.h" // Includes EDockingStatus
+#include "Components/DockingPadComponent.h" // Includes EDockingStatus
 #include "SolaraqShipBase.generated.h" // Must be last include
 
 class ASolaraqHomingProjectile;
@@ -20,6 +18,7 @@ class UDamageType;
 class USceneComponent;
 class UProjectileMovementComponent;
 class AActor;
+class UDockingPadComponent; // Forward declare
 
 // class UCameraComponent; // If camera is added later
 
@@ -36,7 +35,7 @@ class AActor;
  *
  * Designed to be inherited by Blueprint classes (e.g., BP_PlayerShip, BP_EnemyShip_TypeA)
  * which will define specific meshes, stats, weapon systems, and input handling.
- * Physics simulation is handled by the CollisionAndPhysicsRoot (BoxComponent).
+ * Physics simulation is handled by the CollisionAndPhysicsRoot (SphereComponent).
  * The ShipMeshComponent is purely visual and attached to the physics root.
  */
 UCLASS(Abstract) // Mark as Abstract so you can't place this base class directly in the world
@@ -96,12 +95,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> MuzzlePoint;
 
-
-	
 	// --- Movement Properties ---
 
 	/** Base force applied for forward/backward thrust (scaled by input). */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Solaraq|Movement", meta = (ForceUnits="cm/s^2 * kg?")) // Force units are tricky
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Solaraq|Movement", meta = (ForceUnits="cm/s^2 * kg?"))
 	float ThrustForce = 140000.0f;
 
 	/** Turning speed in degrees per second (scaled by input). */
@@ -122,7 +119,7 @@ protected:
 	float RollInterpolationSpeed = 6.0f;
 
 	/** Current target roll angle based on input. Updated by input processing. */
-	UPROPERTY(Transient, Replicated) // No need to save/replicate visual state
+	UPROPERTY(Transient, ReplicatedUsing = OnRep_TurnInputForRoll)
 	float CurrentTurnInputForRoll = 0.0f;
 
 	/** The current visually applied roll angle */
@@ -130,7 +127,7 @@ protected:
 	float CurrentVisualRoll = 0.0f;
 
 	// Replication Notifier function declaration
-	UFUNCTION() // <<< Needs to be UFUNCTION()
+	UFUNCTION()
 	virtual void OnRep_TurnInputForRoll();
 
 	// --- Inventory / Resources ---
@@ -158,7 +155,6 @@ protected:
 	void OnInventoryUpdated(); // Call this inside OnRep functions
 	
 public:
-
 	/**
 	 * Called by a pickup actor on the server when this ship collects it.
 	 * @param PickupType The type of item being collected.
@@ -171,8 +167,8 @@ public:
 	/** Public function to allow the controller (or input binding) to update the turn input state */
 	void SetTurnInputForRoll(float TurnValue);
 	
-	// --- Weapon Properties ---
 protected: // Keep protected or make EditDefaultsOnly
+	// --- Weapon Properties ---
 	/** The Blueprint class of the projectile this ship fires. Assign BP_Bullet (or similar) in derived Blueprint Defaults. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Weapon")
 	TSubclassOf<ASolaraqProjectile> ProjectileClass;
@@ -190,14 +186,12 @@ protected: // Keep protected or make EditDefaultsOnly
 	float LastFireTime = -1.0f;
 
 	// --- Core Firing Logic ---
-protected:
 	/**
 	 * Performs the actual weapon firing logic (Server-side).
 	 * Checks cooldown, spawns projectile, calculates velocity including ship's velocity.
 	 * Designed to be called by AI or Player request functions.
 	 */
 	virtual void PerformFireWeapon();
-	
 	
 	// --- Speed Clamping ---
 
@@ -267,31 +261,31 @@ protected:
 	TSubclassOf<ASolaraqHomingProjectile> HomingProjectileClass;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Weapon|HomingMissile")
-	float HomingMissileFireRate; // Seconds between shots
+	float HomingMissileFireRate = 2.0f; // Seconds between shots
 
 	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Weapon|HomingMissile")
-	float HomingMissileLaunchSpeed; // Speed missile is launched at, can be 0 if PMC InitialSpeed is used
+	float HomingMissileLaunchSpeed = 4000.0f; // Speed missile is launched at
 
 	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Weapon|HomingMissile")
-	float MaxHomingTargetRange; // Max range to acquire a homing target
+	float MaxHomingTargetRange = 10000.0f; // Max range to acquire a homing target
 
-	float LastHomingFireTime;
+	UPROPERTY(Transient)
+	float LastHomingFireTime = -1.0f;
 
 	void PerformFireHomingMissile(AActor* HomingTarget);
-
 	
 	// --- Docking State ---
 
-	/** True if the ship is currently docked to a pad. Replicated with notification. */
-	//UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_IsDocked)
-	//bool bIsDocked = false;
+	/** Current status of docking. Replicated with notification. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_DockingStateChanged)
+	EDockingStatus CurrentDockingStatus = EDockingStatus::None;
 
-	/** Reference to the specific docking pad component we are docked to. Replicated with notification. */
-//	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_DockedToPad)
-//	TObjectPtr<UDockingPadComponent> DockedToPadComponent;
+	/** Reference to the specific docking pad component we are docked/docking to. Replicated with notification. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_DockingStateChanged)
+	TObjectPtr<UDockingPadComponent> ActiveDockingPad;
 
 	// --- Server-Side Movement Logic ---
-
+protected:
 	/** Applies forward/backward force based on input axis value (Server-side). */
 	void ProcessMoveForwardInput(float Value);
 
@@ -315,17 +309,16 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Solaraq|Server")
 	void Server_SetAttemptingBoost(bool bAttempting);
 
- // Needs to be public for input binding
-	/** Server RPC called by the client player to request firing the weapon. */
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Solaraq|Weapon") // Make callable if needed from BP input
+ 	/** Server RPC called by the client player to request firing the weapon. */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Solaraq|Weapon")
 	void Server_RequestFire();
 
-	// MODIFIED RPC: Now takes a target parameter
-    UFUNCTION(Server, Reliable)
+	/** Server RPC called by the client player to request firing a homing missile at a target. */
+    UFUNCTION(Server, Reliable, BlueprintCallable, Category = "Solaraq|Weapon") // Make callable for player input binding
     void Server_RequestFireHomingMissileAtTarget(AActor* TargetToShootAt);
 	
-	// --- Replication Notifiers (Called on Clients) ---
 protected:
+	// --- Replication Notifiers (Called on Clients) ---
 	/** Replication notification function for CurrentHealth. Called on Clients. */
 	UFUNCTION()
 	void OnRep_CurrentHealth();
@@ -342,13 +335,9 @@ protected:
 	UFUNCTION()
 	virtual void OnRep_IsBoosting();
 
-	/** Replication notification function for bIsDocked. Called on Clients. */
-	//UFUNCTION()
-	//virtual void OnRep_IsDocked();
-
-	/** Replication notification function for DockedToPadComponent. Called on Clients. */
-	//UFUNCTION()
-	//virtual void OnRep_DockedToPad();
+	/** Replication notification function for docking state changes. Called on Clients. */
+	UFUNCTION()
+	virtual void OnRep_DockingStateChanged();
 
 	// --- Health & Destruction ---
 
@@ -383,33 +372,31 @@ public:
 	
 	// --- Docking Logic ---
 
-	/** Server-side function called BY the Docking Pad to initiate docking ON this ship. Handles state changes and attachment. */
-//	UFUNCTION(BlueprintCallable, Category = "Solaraq|Docking") // Callable from BP for potential future use
-//	virtual void Server_DockWithPad(UDockingPadComponent* PadToDockWith);
+public:
+	/** Server RPC called by client overlap or AI to request docking with a specific pad. */
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Solaraq|Docking")
+	void Server_RequestDockWithPad(UDockingPadComponent* PadToDockWith);
 
 	/** Server RPC called by client input or logic to request undocking. Handles state changes and detachment. */
-	//UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Solaraq|Docking")
-	//void Server_RequestUndock();
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "Solaraq|Docking")
+	void Server_RequestUndock();
 protected:
 	/** Server-side helper function to handle the actual physics disabling and component attachment during docking. */
-	//void PerformDockingAttachment();
+	void PerformDockingAttachmentToPad(UDockingPadComponent* Pad);
 
 	/** Server-side helper function to handle the actual component detachment and physics re-enabling during undocking. */
-	//void PerformUndockingDetachment();
+	void PerformUndockingDetachmentFromPad();
 
 	/** Server-side helper function to disable relevant ship systems (input, boost, etc.) when docked. */
-	//virtual void DisableSystemsForDocking();
+	virtual void Internal_DisableSystemsForDocking();
 
 	/** Server-side helper function to re-enable relevant ship systems after undocking. */
-	//virtual void EnableSystemsAfterUndocking();
+	virtual void Internal_EnableSystemsAfterUndocking();
 
 public:
-	
-	
-
 	// --- Public Getters ---
 
-	/** Gets the physics root component (BoxComponent). */
+	/** Gets the physics root component (SphereComponent). */
 	FORCEINLINE USphereComponent* GetCollisionAndPhysicsRoot() const { return CollisionAndPhysicsRoot; }
 
 	/** Gets the visual static mesh component. */
@@ -431,16 +418,20 @@ public:
 	bool IsBoosting() const { return bIsBoosting; }
 
 	/** Returns true if the ship is currently docked. */
-	//UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
-	//bool IsDocked() const { return bIsDocked; }
+	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
+	bool IsShipDocked() const { return CurrentDockingStatus == EDockingStatus::Docked; }
+
+	/** Returns true if the ship is currently docked or in the process of docking/undocking. */
+	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
+	bool IsShipDockedOrDocking() const;
 
 	/** Returns true if the ship is docked specifically to the given pad component. */
-//	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
-//	bool IsDockedTo(const UDockingPadComponent* Pad) const;
+	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
+	bool IsDockedToPad(const UDockingPadComponent* Pad) const;
 
-	/** Gets the docking pad component the ship is currently docked to, if any. */
-//	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
-//	UDockingPadComponent* GetCurrentDockingPad() const { return DockedToPadComponent; }
+	/** Gets the docking pad component the ship is currently associated with (docked or attempting), if any. */
+	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
+	UDockingPadComponent* GetActiveDockingPad() const { return ActiveDockingPad; }
 
 	/** Gets the current health as a fraction of maximum health (0.0 to 1.0). */
 	UFUNCTION(BlueprintPure, Category = "Solaraq|Health")
@@ -449,7 +440,44 @@ public:
 	/** Returns true if the ship's health is at or below zero and the destruction process has started. */
 	UFUNCTION(BlueprintPure, Category = "Solaraq|Health")
 	bool IsDead() const { return bIsDead; }
+
+	/** Target relative location for the ship when docking (usually FVector::ZeroVector). */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Docking")
+	FVector DockingTargetRelativeLocation = FVector::ZeroVector;
+
+	/** Target relative rotation for the ship when docking (usually FRotator::ZeroRotator). */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Docking")
+	FRotator DockingTargetRelativeRotation = FRotator::ZeroRotator;
+
+	/** Speed of the lerp towards the docking target transform. Higher is faster. */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Docking", meta = (ClampMin = "0.1"))
+	float DockingLerpSpeed = 5.0f;
+
+	/** Server-side: Flag to indicate if the docking lerp is currently active. */
+	UPROPERTY(Transient) // No need to replicate, server controls position
+	bool bIsLerpingToDockPosition = false;
+
+	/** Server-side: Store the component to attach to during lerp. */
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> LerpAttachTargetComponent;
+
+	/** Minimum time (seconds) after undocking before the ship can attempt to dock again. */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Docking")
+	float DockingCooldownDuration = 2.0f;
+
+	/** Server-side: Timestamp when the last undock completed. Used for docking cooldown. */
+	UPROPERTY(Transient)
+	float LastUndockTime = -1.0f;
+
+	/** Minimum time (seconds) after initiating a dock before forward thrust will trigger an undock.
+	 *  This prevents immediate undock if thrusting into the pad. */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Docking")
+	float UndockFromThrustGracePeriod = 0.5f; // Small grace period
+
+	/** Server-side: Timestamp when the current docking process (lerp) started. */
+	UPROPERTY(Transient)
+	float CurrentDockingStartTime = -1.0f;
+
+	UPROPERTY(Transient)
+	FRotator ActualDockingTargetRelativeRotation;
 };
-
-
-// --- END OF FILE SolaraqShipBase.h ---
