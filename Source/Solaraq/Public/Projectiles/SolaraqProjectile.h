@@ -27,6 +27,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Projectile")
     void SetBaseDamage(float NewDamage);
 
+    UFUNCTION(BlueprintPure, Category = "Projectile")
+    UProjectileMovementComponent* GetProjectileMovementComponent() const;
+    
 protected:
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;

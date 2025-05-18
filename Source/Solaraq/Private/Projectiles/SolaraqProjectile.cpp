@@ -59,6 +59,12 @@ void ASolaraqProjectile::SetBaseDamage(float NewDamage)
     // UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s BaseDamage set to %.1f"), *GetName(), BaseDamage);
 }
 
+
+    UProjectileMovementComponent* ASolaraqProjectile::GetProjectileMovementComponent() const
+    {
+        return ProjectileMovement;
+    }
+
 // Called when the game starts or when spawned
 void ASolaraqProjectile::BeginPlay()
 {
