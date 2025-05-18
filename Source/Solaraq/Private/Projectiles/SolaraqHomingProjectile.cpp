@@ -75,10 +75,12 @@ void ASolaraqHomingProjectile::Tick(float DeltaTime)
 
 
         FVector InterceptPoint;
+        float DummyTimeToIntercept; // Declare a dummy float to satisfy the new function signature
+        
         bool bCanIntercept = USolaraqMathLibrary::CalculateInterceptPoint(
             SelfLocation, SelfVelocity,
             TargetLocation, TargetVelocity,
-            EffectiveProjectileSpeed, InterceptPoint
+            EffectiveProjectileSpeed, InterceptPoint, DummyTimeToIntercept
         );
 
         FVector AimDirection;

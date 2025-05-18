@@ -65,10 +65,13 @@ void USolaraqBlueprintLogLibrary::LogToSolaraqChannel(
             LogCategoryName = LogSolaraqCelestials.GetCategoryName();
             break;
         case ESolaraqLogCategory::Projectile:
-            LogCategoryName = LogSolaraqCelestials.GetCategoryName();
+            LogCategoryName = LogSolaraqProjectile.GetCategoryName();
             break;
         case ESolaraqLogCategory::Marker:
-            LogCategoryName = LogSolaraqCelestials.GetCategoryName();
+            LogCategoryName = LogSolaraqMarker.GetCategoryName();
+            break;
+        case ESolaraqLogCategory::Turret:
+            LogCategoryName = LogSolaraqTurret.GetCategoryName();
             break;
         // Add cases for new categories here
         default:

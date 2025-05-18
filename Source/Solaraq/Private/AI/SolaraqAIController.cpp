@@ -213,7 +213,17 @@ void ASolaraqAIController::Tick(float DeltaTime)
          {
              // Prediction needs TargetLocation, TargetVelocity, ShipLocation, ShipVelocity
              float ProjectileSpeed = ControlledEnemyShip->GetProjectileMuzzleSpeed();
-             bool bPredictionSuccess = USolaraqMathLibrary::CalculateInterceptPoint(ShipLocation, ShipVelocity, TargetLocation, TargetVelocity, ProjectileSpeed, PredictedAimLocation);
+
+             float DummyTimeToIntercept; // Declare a dummy float to satisfy the new function signature
+             bool bPredictionSuccess = USolaraqMathLibrary::CalculateInterceptPoint(
+                              ShipLocation, 
+                              ShipVelocity, 
+                              TargetLocation, 
+                              TargetVelocity, 
+                              ProjectileSpeed, 
+                              PredictedAimLocation, 
+                              DummyTimeToIntercept // Pass the dummy variable
+                          );
              if (!bPredictionSuccess) PredictedAimLocation = TargetLocation;
 
              // Aiming/Firing conditional logic
