@@ -73,8 +73,15 @@ public:
 	// --- End Generic Team Interface ---
 
 	// Getter for projectile speed used by AI prediction
-	UFUNCTION(BlueprintPure, Category="Weapon") // BlueprintPure means it doesn't change state
+	UFUNCTION(BlueprintPure, Category="Solaraq|Weapon") // BlueprintPure means it doesn't change state
 	float GetProjectileMuzzleSpeed() const { return ProjectileMuzzleSpeed; }
+
+	// Called by PlayerController when Interact is pressed
+	void RequestInteraction();
+
+	// UPROPERTY specific to storing which pad requested the level change.
+	UPROPERTY(BlueprintReadWrite, Category = "Solaraq|Docking")
+	FName CharacterLevelOverrideName;
 	
 protected:
 	// --- Components ---
@@ -111,11 +118,11 @@ protected:
 
 	// --- Visual Roll ---
 	/** Maximum roll angle (degrees) when turning at full speed. */
-	UPROPERTY(EditDefaultsOnly, Category = "Visuals")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Visuals")
 	float MaxTurnRollAngle = 30.0f;
 
 	/** How quickly the ship interpolates to the target roll angle. Higher = faster. */
-	UPROPERTY(EditDefaultsOnly, Category = "Visuals")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Visuals")
 	float RollInterpolationSpeed = 6.0f;
 
 	/** Current target roll angle based on input. Updated by input processing. */
@@ -151,7 +158,7 @@ protected:
 	void OnRep_StandardAmmo();
 
 	// Blueprint event for UI updates (Optional but recommended)
-	UFUNCTION(BlueprintImplementableEvent, Category = "Inventory")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Solaraq|Inventory")
 	void OnInventoryUpdated(); // Call this inside OnRep functions
 	
 public:
@@ -393,6 +400,30 @@ protected:
 	/** Server-side helper function to re-enable relevant ship systems after undocking. */
 	virtual void Internal_EnableSystemsAfterUndocking();
 
+	/** Server-side flag: True if a celestial body is currently applying a scaling effect to this ship. */
+	bool bIsUnderScalingEffect_Server = false;
+
+	/** Server-side: Current effective scale factor applied by celestial bodies. 1.0 means no scaling. */
+	float CurrentEffectiveScaleFactor_Server = 1.0f;
+
+	/**
+	 * Defines how much the ship's max speed is reduced at its smallest scale (MinShipScaleFactor).
+	 * 0.0 = Max speed becomes 0 at MinShipScaleFactor.
+	 * 0.5 = Max speed is halved at MinShipScaleFactor.
+	 * 1.0 = No speed reduction due to scaling (default behavior).
+	 * Values above 1.0 would mean speed increases (unlikely desired).
+	 * This factor is used to interpolate the speed reduction.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Movement|Scaling", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float MinScaleSpeedReductionFactor = 0.7f; // e.g., at smallest scale, speed is 70% of normal. (So 30% reduction)
+
+	/**
+	 * Defines how much the ship's thrust is reduced at its smallest scale (MinShipScaleFactor).
+	 * Similar to MinScaleSpeedReductionFactor.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Movement|Scaling", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float MinScaleThrustReductionFactor = 0.7f; // e.g., at smallest scale, thrust is 70% of normal.
+
 public:
 	// --- Public Getters ---
 
@@ -429,6 +460,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
 	bool IsDockedToPad(const UDockingPadComponent* Pad) const;
 
+	/** Called by CelestialBodyBase on the server to indicate if this ship is under its scaling effect. */
+	void SetUnderScalingEffect_Server(bool bIsBeingScaled);
+
+	/** Called by CelestialBodyBase on the server to update the ship's current effective scale factor for physics. */
+	void SetEffectiveScaleFactor_Server(float NewScaleFactor);
+	
+	/** Client-side check: Returns true if the ship's visual mesh is currently scaled (not 1.0f). */
+	UFUNCTION(BlueprintPure, Category = "Solaraq|Visuals")
+	bool IsVisuallyScaledClient() const { return !FMath::IsNearlyEqual(LastAppliedScaleFactor, 1.0f); }
+	
 	/** Gets the docking pad component the ship is currently associated with (docked or attempting), if any. */
 	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
 	UDockingPadComponent* GetActiveDockingPad() const { return ActiveDockingPad; }

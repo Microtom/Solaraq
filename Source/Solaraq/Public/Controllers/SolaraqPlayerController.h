@@ -5,161 +5,167 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "GenericTeamAgentInterface.h" // Include if PlayerController handles Team ID
-#include "InputActionValue.h" // Include for callback parameter type
+#include "InputActionValue.h"         // Include for callback parameter type
 #include "SolaraqPlayerController.generated.h"
 
 // Forward Declarations
 class UInputMappingContext;
 class UInputAction;
 class UEnhancedInputComponent;
-class ASolaraqShipBase; // Forward declare pawn base class
-class UUserWidget; 
+class ASolaraqShipBase;
+class ASolaraqCharacterPawn; // << NEW: Forward declare character pawn
+class UUserWidget;
 class UWidgetComponent;
 
+// Enum to define control modes (NEW)
+UENUM(BlueprintType)
+enum class EPlayerControlMode : uint8
+{
+    Ship        UMETA(DisplayName = "Ship Control"),
+    Character   UMETA(DisplayName = "Character Control")
+};
 
 UCLASS()
-class SOLARAQ_API ASolaraqPlayerController : public APlayerController, public IGenericTeamAgentInterface // Add team interface if needed here
+class SOLARAQ_API ASolaraqPlayerController : public APlayerController, public IGenericTeamAgentInterface
 {
     GENERATED_BODY()
 
 public:
     ASolaraqPlayerController();
 
-    // --- Generic Team Interface (If handling team here instead of Pawn) ---
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Team")
+    // --- Generic Team Interface ---
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Team")
     FGenericTeamId TeamId = FGenericTeamId(0); // Player Team ID
 
     virtual FGenericTeamId GetGenericTeamId() const override;
     // virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override; // Implement if needed
     // --- End Generic Team Interface ---
 
+    // --- Pawn Getters (NEW/MODIFIED) ---
+    ASolaraqShipBase* GetControlledShip() const;
+    ASolaraqCharacterPawn* GetControlledCharacter() const;
+
+    void InitiateLevelTransitionToCharacter(FName TargetLevelName, FName DockingPadID = NAME_None);
+    void InitiateLevelTransitionToShip(FName TargetShipLevelName);
+    void ApplyInputContextForCurrentMode();
 protected:
     //~ Begin APlayerController Interface
-    /** Called when the controller possesses a Pawn. Useful for initial setup. */
-    // virtual void OnPossess(APawn* InPawn) override;
-    /** Called when the controller unpossesses a Pawn. Useful for cleanup. */
-    // virtual void OnUnPossess() override;
-    /** Called when the game starts for this controller. Used here to add Input Mapping Context. */
+    virtual void OnPossess(APawn* InPawn) override; // << UNCOMMENTED
+    virtual void OnUnPossess() override;             // << UNCOMMENTED
     virtual void BeginPlay() override;
-    /** Set up input bindings. */
     virtual void SetupInputComponent() override;
-    //~ End APlayerController Interface
     virtual void Tick(float DeltaTime) override;
+    virtual void OnRep_Pawn() override; 
+    //~ End APlayerController Interface
 
     // --- Input Assets ---
     // Assign these Input Action Assets in the derived Blueprint Controller (BP_SolaraqPlayerController)
 
-    /** Default Input Mapping Context */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputMappingContext> DefaultMappingContext;
+    /** Default Input Mapping Context (Used for Ship Controls) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input")
+    TObjectPtr<UInputMappingContext> DefaultMappingContext; // This will be our Ship IMC
 
-    /** Input Action for forward/backward movement */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    /** NEW: Input Mapping Context for Character Controls */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input")
+    TObjectPtr<UInputMappingContext> IMC_CharacterControls;
+
+    // --- Ship Input Actions (Existing) ---
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Ship")
     TObjectPtr<UInputAction> MoveAction;
-
-    /** Input Action for turning left/right */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Ship")
     TObjectPtr<UInputAction> TurnAction;
-
-    /** Input Action for firing weapons */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Ship")
     TObjectPtr<UInputAction> FireAction;
-    
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Solaraq|Input|Ship")
     TObjectPtr<UInputAction> FireMissileAction;
-    
-    /** Input Action for activating boost */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Ship")
     TObjectPtr<UInputAction> BoostAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Solaraq|Input|Ship")
+    TObjectPtr<UInputAction> ToggleLockAction;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Solaraq|Input|Ship")
+    TObjectPtr<UInputAction> SwitchTargetAction;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Shared") // Add to Shared or Ship
+    TObjectPtr<UInputAction> InteractAction; 
 
-    // Input Action for toggling lock mode
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputAction> ToggleLockAction; 
-    
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-    TObjectPtr<UInputAction> SwitchTargetAction; 
+    // --- Character Input Actions (NEW) ---
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
+    TObjectPtr<UInputAction> CharacterMoveAction;
 
-    /** Called for TurnAction input (when completed/released) */
-    void HandleTurnCompleted(const FInputActionValue& Value);
+    // --- Shared Input Actions (NEW) ---
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Shared")
+    TObjectPtr<UInputAction> TogglePawnModeAction;
 
-    // --- Input Handling Functions ---
 
-    /** Called for MoveAction input */
+    // --- Input Handling Functions (Existing Ship Handlers) ---
     void HandleMoveInput(const FInputActionValue& Value);
-
-    /** Called for TurnAction input */
     void HandleTurnInput(const FInputActionValue& Value);
-
+    void HandleTurnCompleted(const FInputActionValue& Value);
     void HandleFireMissileRequest(const FInputActionValue& Value);
-    
-    /** Called for FireAction input (when triggered) */
-    void HandleFireRequest(); // Renamed for clarity
-
-    /** Called for BoostAction input (when started) */
+    void HandleFireRequest();
     void HandleBoostStarted(const FInputActionValue& Value);
-
-    /** Called for BoostAction input (when completed/released) */
     void HandleBoostCompleted(const FInputActionValue& Value);
-
     void HandleToggleLock();
-    
     void HandleSwitchTarget(const FInputActionValue& Value);
+    void HandleInteractInput();
 
-    // --- Homing Lock System ---
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Homing Lock")
+    // --- Input Handling Functions (NEW Character & Shared Handlers) ---
+    void HandleCharacterMoveInput(const FInputActionValue& Value);
+    void HandleTogglePawnModeInput();
+
+
+    // --- Homing Lock System (Existing) ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Homing Lock")
     bool bIsHomingLockActive;
-
-    // List of actors currently meeting criteria for targeting
-    UPROPERTY(VisibleAnywhere, Category = "Homing Lock")
+    UPROPERTY(VisibleAnywhere, Category = "Solaraq|Homing Lock")
     TArray<TWeakObjectPtr<AActor>> PotentialHomingTargets;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Homing Lock")
-    int32 LockedHomingTargetIndex; // Index into PotentialHomingTargets
-
-    // Direct pointer for convenience, updated when index changes
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Homing Lock")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Homing Lock")
+    int32 LockedHomingTargetIndex;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Homing Lock")
     TWeakObjectPtr<AActor> LockedHomingTargetActor;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Homing Lock")
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Homing Lock")
     float HomingTargetScanRange;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Homing Lock")
-    float HomingTargetScanConeAngleDegrees; // e.g., 90.0 for a 90 degree forward cone
-
-    UPROPERTY(EditDefaultsOnly, Category = "Homing Lock")
-    float HomingTargetScanInterval; // Time between scans
-
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Homing Lock")
+    float HomingTargetScanConeAngleDegrees;
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Homing Lock")
+    float HomingTargetScanInterval;
     FTimerHandle TimerHandle_ScanTargets;
 
-    // --- HUD / Widgets ---
-    UPROPERTY(EditDefaultsOnly, Category = "Homing Lock|UI")
-    TSubclassOf<UUserWidget> TargetMarkerWidgetClass; // Assign your WBP_TargetMarker
-
-    // Pool or map to manage the screen widgets efficiently
-    UPROPERTY() // Keep alive
+    // --- HUD / Widgets (Existing) ---
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Homing Lock|UI")
+    TSubclassOf<UUserWidget> TargetMarkerWidgetClass;
+    UPROPERTY()
     TMap<TWeakObjectPtr<AActor>, TObjectPtr<UUserWidget>> TargetMarkerWidgets;
-
-    UPROPERTY() // Keep alive
-    TObjectPtr<UUserWidget> LockedTargetMarkerWidgetInstance; // Store the single locked widget instance
-
+    UPROPERTY()
+    TObjectPtr<UUserWidget> LockedTargetMarkerWidgetInstance; // Still seems unused based on your original CPP, consider if needed
 
     void UpdatePotentialTargets();
-    void UpdateTargetWidgets(); // Manages creating/positioning/styling widgets
+    void UpdateTargetWidgets();
     void ClearTargetWidgets();
     void SelectTargetByIndex(int32 Index);
+
+    // --- Pawn Control Management (NEW) ---
+protected:
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Pawn Control")
+    TSubclassOf<ASolaraqCharacterPawn> CharacterPawnClass;
+
+    UPROPERTY(VisibleInstanceOnly, Category = "Solaraq|Pawn Control")
+    TObjectPtr<ASolaraqShipBase> PossessedShipPawn;
+
+    UPROPERTY(VisibleInstanceOnly, Category = "Solaraq|Pawn Control")
+    TObjectPtr<ASolaraqCharacterPawn> PossessedCharacterPawn;
+    
+    EPlayerControlMode CurrentControlMode;
+
+    void SwitchToMode(EPlayerControlMode NewMode);
+    void ClearAllInputContexts();
+    
 
 private:
     /** Cached pointer to the Enhanced Input Component */
     UPROPERTY()
     TObjectPtr<UEnhancedInputComponent> EnhancedInputComponentRef;
 
-    /** Cached pointer to the controlled ship pawn */
-    UPROPERTY() // Cache for efficiency, update OnPossess/OnUnPossess if needed
-    TObjectPtr<ASolaraqShipBase> ControlledShipCached;
-
-    /** Helper to get and cache the controlled ship pawn */
-    ASolaraqShipBase* GetControlledShip() const;
-
+    // Note: ControlledShipCached is removed in favor of PossessedShipPawn and GetControlledShip() logic.
 };
 
 // Implement GetGenericTeamId if needed

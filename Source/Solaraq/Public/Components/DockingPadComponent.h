@@ -29,12 +29,18 @@ class SOLARAQ_API UDockingPadComponent : public USceneComponent
 public:
 	UDockingPadComponent();
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Solaraq|Docking")
+	FName TargetCharacterLevelName; // Level to load when this pad is used for character entry
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Docking")
+	FName DockingPadUniqueID; 
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	/** The volume that detects ships for docking. Made visible for gameplay. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "DockingPad")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|DockingPad")
 	TObjectPtr<UBoxComponent> DockingTriggerVolume;
 
 	/** Server-side: The ship currently docked or attempting to dock with this pad. */
