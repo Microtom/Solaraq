@@ -80,7 +80,7 @@ protected:
 	// NEW: Threshold for what's considered a "significant" direction change (dot product)
 	// Lower value = more sensitive to direction changes. 1.0 = same direction, 0.0 = 90 degrees, -1.0 = opposite.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag", ClampMin = "-1.0", ClampMax = "1.0"))
-	float RejoinDirectionChangeThreshold = 0.5f; 
+	float RejoinDirectionChangeThreshold = 0.1f; 
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
 	ERejoinInterpolationType RejoinInterpolationMethod = ERejoinInterpolationType::Linear;
