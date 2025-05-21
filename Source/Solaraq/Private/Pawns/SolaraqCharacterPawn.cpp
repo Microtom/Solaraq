@@ -97,46 +97,42 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
 
         const float EffectiveMaxOffsetThreshold = MaxCameraTargetOffset - 1.0f;
 
+        FVector CurrentMovementDir = FVector::ZeroVector; // <<<< DECLARE AND INITIALIZE HERE
+
         if (!CharacterVelocity.IsNearlyZero()) // CHARACTER IS MOVING
         {
-            FVector CurrentMovementDir = CharacterVelocity.GetSafeNormal();
+            CurrentMovementDir = CharacterVelocity.GetSafeNormal(); // <<<< ASSIGN VALUE HERE
 
             // Check for significant direction change if we are currently in forced rejoin
             if (bIsInForcedRejoinState)
             {
-                // Compare current movement direction with the direction that started the rejoin
-                if (!DirectionWhenForcedRejoinStarted.IsZero()) // Ensure it was set
+                if (!DirectionWhenForcedRejoinStarted.IsZero())
                 {
                     float DotProductWithRejoinStartDir = FVector::DotProduct(CurrentMovementDir, DirectionWhenForcedRejoinStarted);
                     if (DotProductWithRejoinStartDir < RejoinDirectionChangeThreshold)
                     {
-                        // Significant direction change, break out of forced rejoin
                         bIsInForcedRejoinState = false;
-                        TimeAtMaxOffset = 0.0f; // Reset this timer too, to allow new buildup
-                        // CurrentCameraTargetOffset will now be handled by the "NOT in forced rejoin" block
+                        TimeAtMaxOffset = 0.0f;
                         UE_LOG(LogTemp, Verbose, TEXT("Camera: Broke forced rejoin due to direction change. Dot: %.2f"), DotProductWithRejoinStartDir);
                     }
                 }
             }
 
-
             FVector IdealLookAheadOffset = CurrentMovementDir * CameraLookAheadFactor;
             FVector ClampedIdealLookAhead = IdealLookAheadOffset.GetClampedToMaxSize(MaxCameraTargetOffset);
 
-            if (bIsInForcedRejoinState) // Re-check, as it might have been changed above
+            if (bIsInForcedRejoinState) 
             {
-                // FORCED REJOIN IS ACTIVE (and no significant direction change occurred)
-                // (Linear or InterpTo logic as before)
+                // FORCED REJOIN IS ACTIVE
                 if (RejoinInterpolationMethod == ERejoinInterpolationType::Linear)
                 {
-                    FVector RejoinDirection = -CurrentCameraTargetOffset.GetSafeNormal();
-                    float DistanceToTravelThisFrame = CameraForcedRejoinSpeed_Linear * DeltaTime;
-                    if (CurrentCameraTargetOffset.SizeSquared() > FMath::Square(DistanceToTravelThisFrame)) {
-                        CurrentCameraTargetOffset += RejoinDirection * DistanceToTravelThisFrame;
-                    } else {
-                        CurrentCameraTargetOffset = FVector::ZeroVector;
-                    }
-                } else {
+                    float CurrentMagnitude = CurrentCameraTargetOffset.Size();
+                    float TargetMagnitudeThisFrame = FMath::Max(0.f, CurrentMagnitude - (CameraForcedRejoinSpeed_Linear * DeltaTime));
+                    CurrentCameraTargetOffset = CurrentMovementDir * TargetMagnitudeThisFrame;
+                    // if (TargetMagnitudeThisFrame <= 0.0f) { } // No specific action needed if it hits zero here
+                }
+                else 
+                {
                     CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(
                         CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraForcedRejoinSpeed_Interp);
                 }
@@ -152,43 +148,43 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
                     if (TimeAtMaxOffset >= DelayBeforeForcedRejoin)
                     {
                         bIsInForcedRejoinState = true;
-                        DirectionWhenForcedRejoinStarted = CurrentMovementDir; // CAPTURE direction when rejoin starts
+                        DirectionWhenForcedRejoinStarted = CurrentMovementDir;
                         UE_LOG(LogTemp, Verbose, TEXT("Camera: Initiated forced rejoin. Dir: %s"), *DirectionWhenForcedRejoinStarted.ToString());
-                        // First step of rejoin
+                        
                         if (RejoinInterpolationMethod == ERejoinInterpolationType::Linear) {
-                             FVector RejoinDirection = -CurrentCameraTargetOffset.GetSafeNormal();
-                             float DistanceToTravelThisFrame = CameraForcedRejoinSpeed_Linear * DeltaTime;
-                             if (CurrentCameraTargetOffset.SizeSquared() > FMath::Square(DistanceToTravelThisFrame)) {
-                                CurrentCameraTargetOffset += RejoinDirection * DistanceToTravelThisFrame;
-                             } else { CurrentCameraTargetOffset = FVector::ZeroVector; }
+                             float CurrentMagnitude = CurrentCameraTargetOffset.Size();
+                             float TargetMagnitudeThisFrame = FMath::Max(0.f, CurrentMagnitude - (CameraForcedRejoinSpeed_Linear * DeltaTime));
+                             CurrentCameraTargetOffset = CurrentMovementDir * TargetMagnitudeThisFrame;
                         } else {
                             CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo( CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraForcedRejoinSpeed_Interp);
                         }
                     }
                     else
                     {
-                        // AT MAX, BUT STILL IN DELAY PERIOD
                         CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(CurrentCameraTargetOffset, ClampedIdealLookAhead, DeltaTime, CustomCameraLagSpeed);
                         CurrentCameraTargetOffset = CurrentCameraTargetOffset.GetSafeNormal() * MaxCameraTargetOffset;
                     }
                 }
                 else
                 {
-                    // BUILDING UP OFFSET
-                    TimeAtMaxOffset = 0.0f; // Reset timer if we are not at max
-                    DirectionWhenForcedRejoinStarted = FVector::ZeroVector; // Clear this if not in rejoin or about to be
+                    TimeAtMaxOffset = 0.0f;
                     CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(CurrentCameraTargetOffset, ClampedIdealLookAhead, DeltaTime, CustomCameraLagSpeed);
                 }
             }
-            LastMovementDirection = CurrentMovementDir; // Update for next frame's comparison if needed (though less critical now)
+            LastMovementDirection = CurrentMovementDir;
         }
         else // CHARACTER IS STOPPED
         {
+            // CurrentMovementDir remains ZeroVector as initialized
             CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraRecenteringSpeed);
             bIsInForcedRejoinState = false;
             TimeAtMaxOffset = 0.0f;
-            LastMovementDirection = FVector::ZeroVector;
-            DirectionWhenForcedRejoinStarted = FVector::ZeroVector; // Clear when stopped
+            LastMovementDirection = FVector::ZeroVector; // Already ZeroVector from CurrentMovementDir
+            DirectionWhenForcedRejoinStarted = FVector::ZeroVector;
+        }
+        
+        if (!bIsInForcedRejoinState) {
+            DirectionWhenForcedRejoinStarted = FVector::ZeroVector;
         }
 
         SpringArmComponent->TargetOffset = CurrentCameraTargetOffset;
@@ -199,21 +195,21 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
             DrawDebugSphere(GetWorld(), CharacterLocation, 25.0f, 12, FColor::Green, false, -1.0f, 0, 1.0f);
             FVector SpringArmActualTargetLocation = SpringArmComponent->GetComponentLocation() + SpringArmComponent->TargetOffset;
             DrawDebugSphere(GetWorld(), SpringArmActualTargetLocation, 30.0f, 12, FColor::Blue, false, -1.0f, 0, 1.0f);
-            if (CameraComponent) {
-                 DrawDebugSphere(GetWorld(), CameraComponent->GetComponentLocation(), 20.0f, 12, FColor::Red, false, -1.0f, 0, 1.0f);
-            }
+            
             DrawDebugLine(GetWorld(), CharacterLocation, SpringArmActualTargetLocation, FColor::Yellow, false, -1.0f, 0, 1.0f);
             
-            FString DebugText = FString::Printf(TEXT("ForcedRejoin: %s (Dir: %s)\nTimeAtMax: %.2f\nOffsetMag: %.1f\nRejoinType: %s"),
+            // CurrentMovementDir is now in scope here
+            FString DebugText = FString::Printf(TEXT("ForcedRejoin: %s (StartDir: %s)\nTimeAtMax: %.2f\nOffsetMag: %.1f\nRejoinType: %s\nCurrMoveDir: %s"),
                 bIsInForcedRejoinState ? TEXT("TRUE") : TEXT("FALSE"), 
-                *DirectionWhenForcedRejoinStarted.ToString(),
+                *DirectionWhenForcedRejoinStarted.ToString().Left(15), 
                 TimeAtMaxOffset, 
                 CurrentCameraTargetOffset.Size(), 
-                RejoinInterpolationMethod == ERejoinInterpolationType::Linear ? TEXT("Linear") : TEXT("EaseOut"));
+                RejoinInterpolationMethod == ERejoinInterpolationType::Linear ? TEXT("Linear") : TEXT("EaseOut"),
+                *CurrentMovementDir.ToString().Left(15)); 
             DrawDebugString(GetWorld(), CharacterLocation + FVector(0,0,100), DebugText, nullptr, FColor::White, 0.f, true, 1.f);
         }
     }
-    else if (SpringArmComponent) // Custom lag is off
+    else if (SpringArmComponent) 
     {
         SpringArmComponent->TargetOffset = FVector::ZeroVector;
         CurrentCameraTargetOffset = FVector::ZeroVector;
