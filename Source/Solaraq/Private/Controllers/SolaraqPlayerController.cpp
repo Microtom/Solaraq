@@ -1,163 +1,698 @@
 // SolaraqPlayerController.cpp
 
-#include "Controllers/SolaraqPlayerController.h"
+#include "Controllers/SolaraqPlayerController.h" // Ensure this matches your path
 
 #include "EngineUtils.h"
-#include "EnhancedInputComponent.h" // Include for UEnhancedInputComponent
-#include "EnhancedInputSubsystems.h" // Include for Subsystem
-#include "InputMappingContext.h" // Include for UInputMappingContext
-#include "InputAction.h" // Include for UInputAction
-#include "Pawns/SolaraqShipBase.h" // Include ship base class
-#include "InputModifiers.h"
-#include "GameFramework/Pawn.h"
-#include "Logging/SolaraqLogChannels.h"
-#include "GenericTeamAgentInterface.h" // Include if needed
+#include "Pawns/SolaraqShipBase.h"             // Ensure this matches your path
+#include "Pawns/SolaraqCharacterPawn.h"        // << NEW: Include CharacterPawn
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputMappingContext.h"
+#include "InputAction.h"
+#include "Logging/SolaraqLogChannels.h" // Your custom log channels
 #include "Blueprint/UserWidget.h"
+#include "Core/SolaraqGameInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "UI/TargetWidgetInterface.h"
-
+// Other includes you might have (EngineUtils, etc.)
 
 ASolaraqPlayerController::ASolaraqPlayerController()
 {
-    // Constructor
-    TeamId = FGenericTeamId(0); // Ensure Player Team ID is set
+    // TeamId is initialized in the header
     bIsHomingLockActive = false;
     LockedHomingTargetIndex = -1;
-    HomingTargetScanRange = 25000.0f; // Sensible default
-    HomingTargetScanConeAngleDegrees = 90.0f; // +/- 45 degrees forward
-    HomingTargetScanInterval = 0.5f; // Scan 2 times per second
+    HomingTargetScanRange = 25000.0f;
+    HomingTargetScanConeAngleDegrees = 90.0f;
+    HomingTargetScanInterval = 0.5f;
+
+    // NEW: Initialize pawn control variables
+    CurrentControlMode = EPlayerControlMode::Ship; // Default to ship control
+    PossessedShipPawn = nullptr;
+    PossessedCharacterPawn = nullptr;
 }
 
 void ASolaraqPlayerController::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Get the Enhanced Input subsystem
-    if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+    // Initial pawn possession is handled by the engine calling OnPossess.
+    // We apply the input context based on the initially possessed pawn.
+    ApplyInputContextForCurrentMode();
+}
+
+void ASolaraqPlayerController::OnPossess(APawn* InPawn)
+{
+    Super::OnPossess(InPawn);
+    // Log on both server and client to compare, but especially important for client
+    FString AuthorityPrefix = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
+    UE_LOG(LogSolaraqMovement, Warning, TEXT("%s PC %s: OnPossess - Possessing: %s (Class: %s)"),
+        *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(InPawn), *GetNameSafe(InPawn ? InPawn->GetClass() : nullptr));
+
+    if (ASolaraqShipBase* Ship = Cast<ASolaraqShipBase>(InPawn))
     {
-        if (UEnhancedInputLocalPlayerSubsystem* InputSubsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
-        {
-            // Add the mapping context
-            if (DefaultMappingContext)
-            {
-                InputSubsystem->AddMappingContext(DefaultMappingContext, 0); // Priority 0
-                //UE_LOG(LogSolaraqSystem, Log, TEXT("Added Input Mapping Context %s"), *DefaultMappingContext->GetName());
-            }
-            else
-            {
-                 //UE_LOG(LogSolaraqSystem, Error, TEXT("%s DefaultMappingContext is not assigned! Input will not work."), *GetName());
-            }
-        }
-         else
-             {
-                //UE_LOG(LogSolaraqSystem, Error, TEXT("Failed to get EnhancedInputLocalPlayerSubsystem!"));
-             }
+        PossessedShipPawn = Ship;
+        PossessedCharacterPawn = nullptr; // Ensure character is cleared if we are re-possessing a ship
+        CurrentControlMode = EPlayerControlMode::Ship;
+        UE_LOG(LogSolaraqMovement, Warning, TEXT("%s PC %s: OnPossess successfully cast to ASolaraqShipBase. Mode set to Ship. PossessedShipPawn is now %s."),
+            *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(PossessedShipPawn));
     }
-     else
-         {
-            //UE_LOG(LogSolaraqSystem, Error, TEXT("Failed to get LocalPlayer!"));
-         }
+    else if (ASolaraqCharacterPawn* PossessedChar = Cast<ASolaraqCharacterPawn>(InPawn))
+    {
+        PossessedCharacterPawn = PossessedChar;
+        // PossessedShipPawn should remain valid if we came from it (it's "parked")
+        CurrentControlMode = EPlayerControlMode::Character;
+        UE_LOG(LogSolaraqMovement, Warning, TEXT("%s PC %s: OnPossess successfully cast to ASolaraqCharacterPawn. Mode set to Character. PossessedCharacterPawn is now %s. PossessedShipPawn remains %s."),
+            *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(PossessedCharacterPawn), *GetNameSafe(PossessedShipPawn));
+    }
+    else
+    {
+        UE_LOG(LogSolaraqMovement, Error, TEXT("%s PC %s: OnPossess FAILED to cast InPawn (%s) to known type. Control mode may be incorrect."),
+            *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(InPawn));
+        CurrentControlMode = EPlayerControlMode::Ship; // Fallback, though this case should be rare
+    }
+    
+    ApplyInputContextForCurrentMode();
+}
+
+void ASolaraqPlayerController::OnUnPossess()
+{
+    FString AuthorityPrefix = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
+    UE_LOG(LogSolaraqMovement, Log, TEXT("%s PC %s: OnUnPossess - Unpossessing: %s. Clearing local possessed pawn refs."),
+        *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(GetPawn())); // GetPawn() might be the old pawn here
+
+    Super::OnUnPossess();
 }
 
 void ASolaraqPlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
 
-    // Cast InputComponent to UEnhancedInputComponent
     EnhancedInputComponentRef = Cast<UEnhancedInputComponent>(InputComponent);
     if (!EnhancedInputComponentRef)
     {
-        //UE_LOG(LogSolaraqSystem, Error, TEXT("%s Failed to cast InputComponent to UEnhancedInputComponent! Enhanced Input bindings will fail."), *GetName());
+        UE_LOG(LogSolaraqSystem, Error, TEXT("%s Failed to cast InputComponent to UEnhancedInputComponent! Enhanced Input bindings will fail."), *GetName());
         return;
     }
 
-     //UE_LOG(LogSolaraqSystem, Log, TEXT("Setting up Enhanced Input Bindings for %s"), *GetName());
+    UE_LOG(LogSolaraqSystem, Log, TEXT("Setting up Enhanced Input Bindings for %s"), *GetName());
 
-    // --- Bind Actions ---
-    // Verify Input Action assets are assigned before binding
-    if (MoveAction)
-    {
-        EnhancedInputComponentRef->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleMoveInput);
-         //UE_LOG(LogSolaraqSystem, Verbose, TEXT(" - MoveAction Bound"));
-    }
-    else
-        {
-            //UE_LOG(LogSolaraqSystem, Warning, TEXT("MoveAction not assigned in PlayerController!"));
-        }
-
+    // --- Bind Ship Actions (Existing) ---
+    if (MoveAction) EnhancedInputComponentRef->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleMoveInput);
     if (TurnAction)
     {
         EnhancedInputComponentRef->BindAction(TurnAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleTurnInput);
         EnhancedInputComponentRef->BindAction(TurnAction, ETriggerEvent::Completed, this, &ASolaraqPlayerController::HandleTurnCompleted);
-        //UE_LOG(LogSolaraqSystem, Verbose, TEXT(" - TurnAction Bound"));
-    } else
-        {
-        //UE_LOG(LogSolaraqSystem, Warning, TEXT("TurnAction not assigned in PlayerController!"));
-        }
-
-    if (FireAction)
-    {
-        // Bind to Triggered for single shots or hold-to-fire start
-        EnhancedInputComponentRef->BindAction(FireAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleFireRequest);
-         //UE_LOG(LogSolaraqProjectile, Warning, TEXT(" - FireAction Bound"));
-    } else
-        {
-            //UE_LOG(LogSolaraqSystem, Warning, TEXT("FireAction not assigned in PlayerController!"));
-        }
-
+    }
+    if (FireAction) EnhancedInputComponentRef->BindAction(FireAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleFireRequest);
     if (BoostAction)
     {
         EnhancedInputComponentRef->BindAction(BoostAction, ETriggerEvent::Started, this, &ASolaraqPlayerController::HandleBoostStarted);
         EnhancedInputComponentRef->BindAction(BoostAction, ETriggerEvent::Completed, this, &ASolaraqPlayerController::HandleBoostCompleted);
-         //UE_LOG(LogSolaraqSystem, Verbose, TEXT(" - BoostAction Bound (Started/Completed)"));
     }
-    else
-    {
-        //UE_LOG(LogSolaraqSystem, Warning, TEXT("BoostAction not assigned in PlayerController!"));
-    }
+    if (FireMissileAction) EnhancedInputComponentRef->BindAction(FireMissileAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleFireMissileRequest);
+    if (ToggleLockAction) EnhancedInputComponentRef->BindAction(ToggleLockAction, ETriggerEvent::Started, this, &ASolaraqPlayerController::HandleToggleLock);
+    if (SwitchTargetAction) EnhancedInputComponentRef->BindAction(SwitchTargetAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleSwitchTarget);
 
-    if (FireMissileAction)
-    {
-        EnhancedInputComponentRef->BindAction(FireMissileAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleFireMissileRequest);
-                //UE_LOG(LogSolaraqProjectile, Warning, TEXT(" - FireHomingAction Bound"));
-    }
-    else
-    {
-        //UE_LOG(LogSolaraqSystem, Warning, TEXT("FireHomingAction not assigned in PlayerController!"));
+    if (InteractAction) { 
+        EnhancedInputComponentRef->BindAction(InteractAction, ETriggerEvent::Started, this, &ASolaraqPlayerController::HandleInteractInput);
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: SetupInputComponent - SUCCESSFULLY BOUND InteractAction to HandleInteractInput."), *GetNameSafe(this));
+    } else {
+        UE_LOG(LogSolaraqTransition, Error, TEXT("PC %s: SetupInputComponent - InteractAction IS NULL! Cannot bind HandleInteractInput."), *GetNameSafe(this));
     }
     
-    if (ToggleLockAction)
-    {
-        EnhancedInputComponentRef->BindAction(ToggleLockAction, ETriggerEvent::Started, this, &ASolaraqPlayerController::HandleToggleLock);
-        UE_LOG(LogSolaraqMarker, Warning, TEXT(" - ToggleLockAction Bound"));
-    }
-    else
-    {
-        UE_LOG(LogSolaraqMarker, Warning, TEXT("ToggleLockAction not assigned!"));
-    }
-    
-    if (SwitchTargetAction)
-    {
-        // Bind as Axis type, Triggered fires every frame value is non-zero
-        EnhancedInputComponentRef->BindAction(SwitchTargetAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleSwitchTarget);
-        UE_LOG(LogSolaraqMarker, Warning, TEXT(" - SwitchTargetAction Bound"));
-    }
-    else
-    {
-        UE_LOG(LogSolaraqMarker, Warning, TEXT("SwitchTargetAction not assigned!"));
-    }
+    // --- Bind Character Actions (NEW) ---
+    if (CharacterMoveAction) EnhancedInputComponentRef->BindAction(CharacterMoveAction, ETriggerEvent::Triggered, this, &ASolaraqPlayerController::HandleCharacterMoveInput);
+
+    // --- Bind Shared Actions (NEW) ---
+    if (TogglePawnModeAction) EnhancedInputComponentRef->BindAction(TogglePawnModeAction, ETriggerEvent::Started, this, &ASolaraqPlayerController::HandleTogglePawnModeInput);
+
+    // Apply initial context (also done in BeginPlay/OnPossess, but good to have a call here too)
+    ApplyInputContextForCurrentMode();
 }
 
 void ASolaraqPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // Update widget positions every frame if lock is active
-    if (bIsHomingLockActive)
+    // Update widget positions every frame if lock is active AND in ship mode
+    if (CurrentControlMode == EPlayerControlMode::Ship && bIsHomingLockActive)
     {
-        UpdateTargetWidgets(); // Keep widgets positioned correctly
+        UpdateTargetWidgets();
     }
 }
+
+void ASolaraqPlayerController::OnRep_Pawn()
+{
+    FString AuthorityPrefix = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT"); // Should always be CLIENT here
+    APawn* PawnBeforeSuper = GetPawn();
+
+    // Log before Super call
+    // NET_LOG(LogSolaraqSystem, Log, TEXT("%s PC %s: OnRep_Pawn BEGIN. Pawn (from GetPawn() before Super call): %s."),
+    //     *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(PawnBeforeSuper));
+
+    Super::OnRep_Pawn(); // Let the base class do its work to update GetPawn() and potentially call OnPossess/OnUnPossess
+
+    APawn* CurrentReplicatedPawn = GetPawn(); // This is the pawn the controller is now officially associated with
+
+    // NET_LOG(LogSolaraqSystem, Log, TEXT("%s PC %s: OnRep_Pawn END after Super. Pawn (from GetPawn()): %s."),
+    //     *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(CurrentReplicatedPawn));
+
+    // Now, regardless of whether Super::OnRep_Pawn() managed to call our full OnPossess chain
+    // to update PossessedShipPawn, we ensure our state is correct based on CurrentReplicatedPawn.
+    // This is more robust because AController's OnPossess/OnUnPossess might have different conditions
+    // for firing than just the pawn pointer changing.
+
+    if (CurrentReplicatedPawn)
+    {
+        // If we are now controlling a pawn, explicitly run our OnPossess logic
+        // This ensures PossessedShipPawn/PossessedCharacterPawn and CurrentControlMode are set.
+        // Our OnPossess already checks if it's a ship or character.
+        // This might re-call OnPossess if the engine also called it, but OnPossess should be idempotent
+        // (safe to call multiple times with the same pawn).
+        // Let's check if our internal state *actually needs* updating to avoid redundant calls if possible.
+
+        bool bNeedsUpdate = false;
+        if (ASolaraqShipBase* Ship = Cast<ASolaraqShipBase>(CurrentReplicatedPawn)) {
+            if (PossessedShipPawn != Ship || CurrentControlMode != EPlayerControlMode::Ship) {
+                bNeedsUpdate = true;
+            }
+        } else if (ASolaraqCharacterPawn* Char = Cast<ASolaraqCharacterPawn>(CurrentReplicatedPawn)) {
+            if (PossessedCharacterPawn != Char || CurrentControlMode != EPlayerControlMode::Character) {
+                bNeedsUpdate = true;
+            }
+        } else {
+            // Replicated pawn is not a ship or character we manage this way
+            // If we were previously possessing something, we might need to clear our state
+            if (PossessedShipPawn != nullptr || PossessedCharacterPawn != nullptr) {
+                 // This case implies an unpossess of our managed types, or possession of an unknown type.
+                 // The engine should have called OnUnPossess. For safety, we can clear here.
+                UE_LOG(LogSolaraqMovement, Warning, TEXT("%s PC %s: OnRep_Pawn - Replicated pawn %s is not managed ship/char. Clearing local possessed vars."),
+                        *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(CurrentReplicatedPawn));
+                PossessedShipPawn = nullptr;
+                PossessedCharacterPawn = nullptr;
+                // What should CurrentControlMode be? Perhaps keep it, or have an "Unknown" state.
+                // For now, let OnPossess handle the mode if it's called with a valid type.
+            }
+        }
+
+        if (bNeedsUpdate) {
+            UE_LOG(LogSolaraqMovement, Warning, TEXT("%s PC %s: OnRep_Pawn - State needs update or re-sync. Calling OnPossess with %s."),
+                    *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(CurrentReplicatedPawn));
+            OnPossess(CurrentReplicatedPawn); // This will set PossessedShipPawn/Char and CurrentControlMode
+        }
+    }
+    else // CurrentReplicatedPawn is nullptr (unpossessed)
+    {
+        // The engine should have called our OnUnPossess.
+        // We ensure our internal state reflects this.
+        if (PossessedShipPawn != nullptr || PossessedCharacterPawn != nullptr)
+        {
+            UE_LOG(LogSolaraqMovement, Warning, TEXT("%s PC %s: OnRep_Pawn - Replicated pawn is NULL. Calling OnUnPossess to clear local state."),
+                    *AuthorityPrefix, *GetNameSafe(this));
+            OnUnPossess(); // Call our OnUnPossess to clear PossessedShipPawn/Char
+                           // Note: Our OnUnPossess doesn't currently clear these, it's mostly a log.
+                           // It might be better to explicitly clear them here or in OnUnPossess.
+            // For robustness:
+            PossessedShipPawn = nullptr;
+            PossessedCharacterPawn = nullptr;
+            // CurrentControlMode = EPlayerControlMode::Ship; // Or some default "limbo" state
+        }
+    }
+}
+
+void ASolaraqPlayerController::ClearAllInputContexts()
+{
+    if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+    {
+        if (UEnhancedInputLocalPlayerSubsystem* InputSubsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+        {
+            if (DefaultMappingContext) InputSubsystem->RemoveMappingContext(DefaultMappingContext); // Ship context
+            if (IMC_CharacterControls) InputSubsystem->RemoveMappingContext(IMC_CharacterControls); // Character context
+            //UE_LOG(LogSolaraqSystem, Log, TEXT("Cleared all known input contexts."));
+        }
+    }
+}
+
+void ASolaraqPlayerController::ApplyInputContextForCurrentMode()
+{
+    if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+    {
+        if (UEnhancedInputLocalPlayerSubsystem* InputSubsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+        {
+            ClearAllInputContexts(); // Clear existing contexts first
+
+            if (CurrentControlMode == EPlayerControlMode::Ship)
+            {
+                if (DefaultMappingContext) // Your existing ship context
+                {
+                    InputSubsystem->AddMappingContext(DefaultMappingContext, 0);
+                    UE_LOG(LogSolaraqSystem, Log, TEXT("Applied SHIP Input Mapping Context: %s"), *DefaultMappingContext->GetName());
+                }
+                else UE_LOG(LogSolaraqSystem, Error, TEXT("ASolaraqPlayerController: DefaultMappingContext (for Ship) is not assigned! Input will not work."));
+            }
+            else if (CurrentControlMode == EPlayerControlMode::Character)
+            {
+                if (IMC_CharacterControls)
+                {
+                    InputSubsystem->AddMappingContext(IMC_CharacterControls, 0);
+                    UE_LOG(LogSolaraqSystem, Log, TEXT("Applied CHARACTER Input Mapping Context: %s"), *IMC_CharacterControls->GetName());
+                }
+                else UE_LOG(LogSolaraqSystem, Error, TEXT("ASolaraqPlayerController: IMC_CharacterControls is not assigned! Input will not work."));
+            }
+        }
+         else UE_LOG(LogSolaraqSystem, Error, TEXT("Failed to get EnhancedInputLocalPlayerSubsystem!"));
+    }
+     else UE_LOG(LogSolaraqSystem, Error, TEXT("Failed to get LocalPlayer!"));
+}
+
+void ASolaraqPlayerController::SwitchToMode(EPlayerControlMode NewMode)
+{
+    APawn* CurrentPawnReference = GetPawn(); // Get current pawn before any unpossess calls
+
+    if (NewMode == CurrentControlMode && CurrentPawnReference)
+    {
+        UE_LOG(LogSolaraqSystem, Log, TEXT("Already in target mode: %s with pawn %s"), (NewMode == EPlayerControlMode::Ship ? TEXT("Ship") : TEXT("Character")), *CurrentPawnReference->GetName());
+        ApplyInputContextForCurrentMode(); // Re-apply context just in case it got cleared
+        return;
+    }
+
+    UE_LOG(LogSolaraqSystem, Log, TEXT("SwitchToMode requested: %s (Current: %s)"), 
+        (NewMode == EPlayerControlMode::Ship ? TEXT("Ship") : TEXT("Character")),
+        (CurrentControlMode == EPlayerControlMode::Ship ? TEXT("Ship") : TEXT("Character")));
+
+    FTransform SpawnTransform;
+    if (CurrentPawnReference)
+    {
+        SpawnTransform = CurrentPawnReference->GetActorTransform();
+    }
+    else if (PlayerCameraManager) // PlayerCameraManager is a member of APlayerController
+    {
+        SpawnTransform.SetLocation(PlayerCameraManager->GetCameraLocation() + PlayerCameraManager->GetActorForwardVector() * 100.f + FVector(0,0,100.f)); // Spawn in front of camera view
+        SpawnTransform.SetRotation(PlayerCameraManager->GetCameraRotation().Quaternion());
+    }
+    else // Absolute fallback if no pawn and no camera manager (should be rare)
+    {
+        SpawnTransform = FTransform(FRotator::ZeroRotator, FVector::ZeroVector + FVector(0,0,100.f)); // Spawn at origin + offset
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("SwitchToMode: No CurrentPawnReference and no PlayerCameraManager. Spawning at world origin offset."));
+    }
+
+    if (NewMode == EPlayerControlMode::Character)
+    {
+        if (!CharacterPawnClass)
+        {
+            UE_LOG(LogSolaraqSystem, Error, TEXT("Cannot switch to Character mode: CharacterPawnClass not set in PlayerController!"));
+            return;
+        }
+
+        // If we have a ship pawn and it's the one currently possessed, cache it.
+        if (PossessedShipPawn && CurrentPawnReference == PossessedShipPawn)
+        {
+             // Spawn slightly behind/offset from the ship
+            SpawnTransform.SetLocation(PossessedShipPawn->GetActorLocation() - PossessedShipPawn->GetActorForwardVector() * 200.f + FVector(0,0,50)); // Adjust offset as needed
+            SpawnTransform.SetRotation(PossessedShipPawn->GetActorQuat()); // Match ship's orientation initially
+        }
+        
+        UnPossess(); // Unpossess current pawn (ship or old character)
+
+        // Destroy old character if it exists and wasn't the one we just unpossessed
+        if (IsValid(PossessedCharacterPawn) && PossessedCharacterPawn != CurrentPawnReference)
+        {
+            PossessedCharacterPawn->Destroy();
+        }
+        PossessedCharacterPawn = nullptr; // Clear previous character pawn
+
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.Owner = this;
+        SpawnParams.Instigator = nullptr;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+        PossessedCharacterPawn = GetWorld()->SpawnActor<ASolaraqCharacterPawn>(CharacterPawnClass, SpawnTransform, SpawnParams);
+
+        if (PossessedCharacterPawn)
+        {
+            Possess(PossessedCharacterPawn); // This will call OnPossess and set CurrentControlMode
+        }
+        else
+        {
+            UE_LOG(LogSolaraqSystem, Error, TEXT("Failed to spawn CharacterPawn!"));
+            // Attempt to re-possess original ship if it exists
+            if (IsValid(PossessedShipPawn))
+            {
+                Possess(PossessedShipPawn); // This will call OnPossess and set mode back to Ship
+            }
+            return; 
+        }
+    }
+    else // NewMode == EPlayerControlMode::Ship
+    {
+        if (!IsValid(PossessedShipPawn))
+        {
+            UE_LOG(LogSolaraqSystem, Error, TEXT("Cannot switch to Ship mode: Original PossessedShipPawn is invalid or not set!"));
+            // If we were controlling a character, try to destroy it.
+            if (IsValid(PossessedCharacterPawn) && CurrentPawnReference == PossessedCharacterPawn)
+            {
+                UnPossess();
+                PossessedCharacterPawn->Destroy();
+            }
+            PossessedCharacterPawn = nullptr;
+            return;
+        }
+        
+        UnPossess(); // Unpossess current character pawn
+
+        // Destroy the character pawn when returning to ship
+        if (IsValid(PossessedCharacterPawn))
+        {
+            PossessedCharacterPawn->Destroy();
+        }
+        PossessedCharacterPawn = nullptr;
+        
+        Possess(PossessedShipPawn); // This will call OnPossess and set CurrentControlMode
+    }
+    // ApplyInputContextForCurrentMode is called within OnPossess
+}
+
+// --- Input Handler Implementations ---
+
+void ASolaraqPlayerController::HandleTogglePawnModeInput()
+{
+    UE_LOG(LogSolaraqSystem, Log, TEXT("HandleTogglePawnModeInput: Current mode is %s"), CurrentControlMode == EPlayerControlMode::Ship ? TEXT("Ship") : TEXT("Character"));
+    if (CurrentControlMode == EPlayerControlMode::Ship)
+    {
+        SwitchToMode(EPlayerControlMode::Character);
+    }
+    else
+    {
+        SwitchToMode(EPlayerControlMode::Ship);
+    }
+}
+
+void ASolaraqPlayerController::HandleCharacterMoveInput(const FInputActionValue& Value)
+{
+    if (CurrentControlMode == EPlayerControlMode::Character && PossessedCharacterPawn)
+    {
+        const FVector2D MovementVector = Value.Get<FVector2D>(); // Assuming IA_CharacterMove is Axis2D
+        PossessedCharacterPawn->HandleMoveInput(MovementVector);
+    }
+}
+
+// --- Helper to get controlled pawn (Modified/New) ---
+ASolaraqShipBase* ASolaraqPlayerController::GetControlledShip() const
+{
+    // Log this specifically when called from a client trying to handle input
+    if (GetNetMode() == NM_Client)
+    {
+        UE_LOG(LogSolaraqMovement, Warning, TEXT("CLIENT PC %s: GetControlledShip() called. CurrentControlMode: %s, PossessedShipPawn: %s"),
+            *GetNameSafe(this),
+            (CurrentControlMode == EPlayerControlMode::Ship ? TEXT("Ship") : (CurrentControlMode == EPlayerControlMode::Character ? TEXT("Character") : TEXT("UNKNOWN"))),
+            *GetNameSafe(PossessedShipPawn));
+    }
+    
+    // Directly return the cached possessed ship if in ship mode
+    // This is updated in OnPossess and SwitchToMode
+    if (CurrentControlMode == EPlayerControlMode::Ship)
+    {
+        return PossessedShipPawn;
+    }
+    return nullptr;
+}
+
+ASolaraqCharacterPawn* ASolaraqPlayerController::GetControlledCharacter() const
+{
+    if (CurrentControlMode == EPlayerControlMode::Character)
+    {
+        return PossessedCharacterPawn;
+    }
+    return nullptr;
+}
+
+void ASolaraqPlayerController::InitiateLevelTransitionToCharacter(FName TargetLevelName, FName DockingPadID)
+{
+    ASolaraqShipBase* CurrentShip = GetControlledShip();
+    if (!CurrentShip)
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("PlayerController: Cannot transition, no controlled ship."));
+        return;
+    }
+
+    USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
+    if (!GI)
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("PlayerController: Cannot transition, GameInstance is invalid."));
+        return;
+    }
+
+    UE_LOG(LogSolaraqSystem, Log, TEXT("PlayerController: Initiating level transition to Character Level: %s (from Pad: %s)"), *TargetLevelName.ToString(), *DockingPadID.ToString());
+
+    // Store necessary info in GameInstance
+    FString CurrentLevelName = GetWorld()->GetName();
+    GI->PrepareForCharacterLevelLoad(TargetLevelName, CurrentShip->GetActorTransform(), FName(*CurrentLevelName), DockingPadID);
+
+    // Unpossess the ship BEFORE loading the new level
+    UnPossess(); 
+    if (IsValid(PossessedShipPawn))
+    {
+        // Don't destroy the ship, it stays in the space level.
+        // We just clear our reference to it as the "actively possessed ship pawn" for the controller.
+        // The GameInstance holds its transform.
+    }
+    PossessedShipPawn = nullptr; // Clear our direct reference, GI has the info
+
+    // Load the new level
+    UGameplayStatics::OpenLevel(this, TargetLevelName);
+}
+
+void ASolaraqPlayerController::InitiateLevelTransitionToShip(FName TargetShipLevelName)
+{
+    USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
+    if (!GI)
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("PlayerController: Cannot transition to ship, GameInstance is invalid."));
+        return;
+    }
+
+    UE_LOG(LogSolaraqSystem, Log, TEXT("PlayerController: Initiating level transition to Ship Level: %s"), *TargetShipLevelName.ToString());
+
+    FString CurrentLevelName = GetWorld()->GetName();
+    GI->PrepareForShipLevelLoad(TargetShipLevelName, FName(*CurrentLevelName));
+
+    UnPossess(); // Unpossess character
+    if (IsValid(PossessedCharacterPawn))
+    {
+        PossessedCharacterPawn->Destroy(); // Destroy character when leaving character level
+    }
+    PossessedCharacterPawn = nullptr;
+
+    UGameplayStatics::OpenLevel(this, TargetShipLevelName);
+}
+
+// --- EXISTING SHIP INPUT HANDLERS (Ensure they check CurrentControlMode or use GetControlledShip()) ---
+void ASolaraqPlayerController::HandleMoveInput(const FInputActionValue& Value)
+{
+    
+    ASolaraqShipBase* Ship = GetControlledShip(); // Use the getter
+    if (Ship)
+    {
+        const float MoveValue = Value.Get<float>();
+        
+        if (GetNetMode() == NM_Client) { // Log only on client before sending RPC
+            UE_LOG(LogSolaraqMovement, Warning, TEXT("CLIENT PC %s: Attempting to call Server_SendMoveForwardInput on Ship %s with Value: %.2f"),
+                *GetNameSafe(this), *GetNameSafe(Ship), MoveValue);
+        }
+        
+        
+        Ship->Server_SendMoveForwardInput(MoveValue);
+    }
+    else if (GetNetMode() == NM_Client)
+    {
+        UE_LOG(LogSolaraqMovement, Error, TEXT("CLIENT PC %s: HandleMoveInput: GetControlledShip() is NULL! Cannot send RPC."), *GetNameSafe(this));
+    }
+}
+
+void ASolaraqPlayerController::HandleTurnInput(const FInputActionValue& Value)
+{
+    ASolaraqShipBase* Ship = GetControlledShip();
+    if (Ship)
+    {
+        const float TurnValue = Value.Get<float>();
+        Ship->Server_SendTurnInput(TurnValue);
+    }
+}
+
+void ASolaraqPlayerController::HandleTurnCompleted(const FInputActionValue& Value)
+{
+    ASolaraqShipBase* Ship = GetControlledShip();
+    if (Ship)
+    {
+        Ship->Server_SendTurnInput(0.0f);
+    }
+}
+
+void ASolaraqPlayerController::HandleFireRequest()
+{
+    ASolaraqShipBase* Ship = GetControlledShip();
+    if (Ship)
+    {
+        Ship->Server_RequestFire();
+    }
+}
+
+void ASolaraqPlayerController::HandleBoostStarted(const FInputActionValue& Value)
+{
+    ASolaraqShipBase* Ship = GetControlledShip();
+    if (Ship)
+    {
+        Ship->Server_SetAttemptingBoost(true);
+    }
+}
+
+void ASolaraqPlayerController::HandleBoostCompleted(const FInputActionValue& Value)
+{
+    ASolaraqShipBase* Ship = GetControlledShip();
+    if (Ship)
+    {
+        Ship->Server_SetAttemptingBoost(false);
+    }
+}
+
+void ASolaraqPlayerController::HandleFireMissileRequest(const FInputActionValue& Value)
+{
+    ASolaraqShipBase* Ship = GetControlledShip();
+    if (Ship && bIsHomingLockActive && LockedHomingTargetActor.IsValid())
+    {
+        AActor* Target = LockedHomingTargetActor.Get();
+        if (Target)
+        {
+            Ship->Server_RequestFireHomingMissileAtTarget(Target);
+        }
+    }
+    else if (!bIsHomingLockActive || !LockedHomingTargetActor.IsValid())
+    {
+        //UE_LOG(LogSolaraqProjectile, Warning, TEXT("Cannot fire homing missile: Lock not active or no valid target locked."));
+    }
+}
+
+void ASolaraqPlayerController::HandleToggleLock()
+{
+    if (CurrentControlMode != EPlayerControlMode::Ship) // Action only valid in ship mode
+    {
+        UE_LOG(LogSolaraqMarker, Warning, TEXT("ToggleLock ignored: Not in Ship control mode."));
+        if (bIsHomingLockActive) // If lock was active from ship mode, turn it off
+        {
+             bIsHomingLockActive = false; // Force deactivate
+             GetWorldTimerManager().ClearTimer(TimerHandle_ScanTargets);
+             PotentialHomingTargets.Empty();
+             LockedHomingTargetIndex = -1;
+             LockedHomingTargetActor = nullptr;
+             ClearTargetWidgets();
+        }
+        return;
+    }
+
+    bIsHomingLockActive = !bIsHomingLockActive;
+    UE_LOG(LogSolaraqMarker, Warning, TEXT("PlayerController: Homing Lock Mode Toggled: %s"), bIsHomingLockActive ? TEXT("ACTIVE") : TEXT("INACTIVE"));
+
+    if (bIsHomingLockActive)
+    {
+        UE_LOG(LogSolaraqMarker, Warning, TEXT("Homing Lock ACTIVATED. Starting target scan timer."));
+        UpdatePotentialTargets();
+        GetWorldTimerManager().SetTimer(TimerHandle_ScanTargets, this, &ASolaraqPlayerController::UpdatePotentialTargets, HomingTargetScanInterval, true);
+    }
+    else
+    {
+        UE_LOG(LogSolaraqMarker, Warning, TEXT("Homing Lock DEACTIVATED. Clearing scan timer and target data."));
+        GetWorldTimerManager().ClearTimer(TimerHandle_ScanTargets);
+        PotentialHomingTargets.Empty();
+        LockedHomingTargetIndex = -1;
+        LockedHomingTargetActor = nullptr;
+        ClearTargetWidgets();
+    }
+}
+
+void ASolaraqPlayerController::HandleSwitchTarget(const FInputActionValue& Value)
+{
+    if (CurrentControlMode != EPlayerControlMode::Ship || !bIsHomingLockActive)
+    {
+        UE_LOG(LogSolaraqMarker, Warning, TEXT("HandleSwitchTarget(): SwitchTarget ignored: Not in Ship mode or Homing lock not active."));
+        return;
+    }
+    if (PotentialHomingTargets.Num() <= 1)
+    {
+        UE_LOG(LogSolaraqMarker, Warning, TEXT("SwitchTarget ignored: Not enough potential targets (%d)."), PotentialHomingTargets.Num());
+        return;
+    }
+
+    const float SwitchValue = Value.Get<float>();
+    if (FMath::IsNearlyZero(SwitchValue))
+    {
+        UE_LOG(LogSolaraqMarker, Warning, TEXT("SwitchTarget ignored: SwitchValue is nearly zero."));
+        return;
+    }
+
+    int32 Direction = FMath::Sign(SwitchValue);
+    int32 CurrentIdx = LockedHomingTargetIndex; // Use a local var for calculation clarity
+    int32 NumTargets = PotentialHomingTargets.Num();
+    int32 NextIndex = (CurrentIdx + Direction + NumTargets) % NumTargets;
+
+    UE_LOG(LogSolaraqMarker, Warning, TEXT("Switching Target: CurrentIndex: %d, Direction: %d, NumTargets: %d, NextIndex: %d"),
+        CurrentIdx, Direction, NumTargets, NextIndex);
+    
+    SelectTargetByIndex(NextIndex);
+
+    if(LockedHomingTargetActor.IsValid())
+    {
+        UE_LOG(LogSolaraqMarker, Warning, TEXT("Successfully Switched Target to: %s (Index: %d)"), *LockedHomingTargetActor->GetName(), LockedHomingTargetIndex);
+    }
+}
+
+void ASolaraqPlayerController::HandleInteractInput()
+{
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: HandleInteractInput TRIGGERED! CurrentControlMode: %s"),
+        *GetNameSafe(this), (CurrentControlMode == EPlayerControlMode::Ship ? TEXT("Ship") : TEXT("Character")));
+    
+    if (CurrentControlMode == EPlayerControlMode::Ship)
+    {
+        ASolaraqShipBase* Ship = GetControlledShip();
+        if (Ship && Ship->IsShipDocked()) // Only allow interaction if fully docked
+        {
+            // The ship itself will handle finding the pad and what "Interact" means
+            Ship->RequestInteraction(); 
+            UE_LOG(LogSolaraqTransition, Warning, TEXT("PlayerController: Sent Interact request to docked ship %s."), *Ship->GetName());
+        }
+        else if (Ship)
+        {
+            UE_LOG(LogSolaraqTransition, Warning, TEXT("PlayerController: Interact pressed, but ship %s is not docked."), *Ship->GetName());
+        }
+        else
+        {
+            UE_LOG(LogSolaraqTransition, Warning, TEXT("PlayerController: Interact pressed in Ship mode, but GetControlledShip() is NULL."));
+        }
+    }
+    else if (CurrentControlMode == EPlayerControlMode::Character)
+    {
+        ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
+        if (CharPawn)
+        {
+            // TODO: Implement character interaction logic (e.g., find nearby interactable actor)
+            UE_LOG(LogSolaraqTransition, Warning, TEXT("PlayerController: Character Interact pressed. (Not yet implemented fully)"));
+            // For now, let's add a temporary way to get back to the ship level for testing
+            // This would normally be triggered by interacting with the ship's "door" in the character level.
+            USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
+            if (GI && GI->OriginLevelName != NAME_None) // Check if we have an origin level to return to
+            {
+                InitiateLevelTransitionToShip(GI->OriginLevelName);
+            }
+        }
+    }
+    else
+    {
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("PlayerController: Interact pressed, but CurrentControlMode is unknown/invalid."));
+    }
+}
+
+
+// --- Homing Lock System Functions (Ensure they are present and check CurrentControlMode if necessary) ---
+// IMPORTANT: You need to copy your full implementations for these from your original SolaraqPlayerController.cpp
+// I'm providing stubs here that include the CurrentControlMode check.
 
 void ASolaraqPlayerController::UpdatePotentialTargets()
 {
@@ -494,11 +1029,33 @@ void ASolaraqPlayerController::ClearTargetWidgets()
         }
     }
     TargetMarkerWidgets.Empty();
-    //NET_LOG(LogSolaraqGUI, Verbose, TEXT("Cleared all target widgets."));
 }
 
 void ASolaraqPlayerController::SelectTargetByIndex(int32 Index)
 {
+    if (CurrentControlMode != EPlayerControlMode::Ship)
+    {
+        AActor* PreviouslyLocked = LockedHomingTargetActor.Get();
+        LockedHomingTargetActor = nullptr;
+        LockedHomingTargetIndex = -1;
+        
+        // If there was a previously locked target, update its widget state
+        if (PreviouslyLocked)
+        {
+            TObjectPtr<UUserWidget>* FoundWidget = TargetMarkerWidgets.Find(PreviouslyLocked);
+            if (FoundWidget && FoundWidget->Get())
+            {
+                if (ITargetWidgetInterface* TargetWidget = Cast<ITargetWidgetInterface>(FoundWidget->Get()))
+                {
+                    TargetWidget->Execute_SetLockedState(FoundWidget->Get(), false); // << CORRECTED CALL
+                }
+                // Optionally hide it too, UpdateTargetWidgets will handle this in the next Tick if logic is correct
+                // FoundWidget->Get()->SetVisibility(ESlateVisibility::Hidden); 
+            }
+        }
+        return;
+    }
+    
     UE_LOG(LogSolaraqMarker, Log, TEXT("SelectTargetByIndex called with Index: %d. PotentialHomingTargets count: %d"), Index, PotentialHomingTargets.Num());
 
     AActor* PreviousLock = LockedHomingTargetActor.Get();
@@ -539,200 +1096,3 @@ void ASolaraqPlayerController::SelectTargetByIndex(int32 Index)
     // which will pick up the change to LockedHomingTargetActor and re-style widgets.
     // No need to call it directly here unless specific immediate feedback is required before the next Tick.
 }
-
-ASolaraqShipBase* ASolaraqPlayerController::GetControlledShip() const
-{
-    // Return cached pointer if valid, otherwise try to get and cast fresh
-    // Note: This caching might need updating in OnPossess/OnUnPossess if the pawn changes frequently
-    // For simplicity, we can just get it fresh each time input is handled.
-    return Cast<ASolaraqShipBase>(GetPawn());
-}
-
-
-void ASolaraqPlayerController::HandleTurnCompleted(const FInputActionValue& Value)
-{
-    // Value passed might contain last value, but we know input stopped, so send 0.
-    ASolaraqShipBase* Ship = GetControlledShip();
-    if (Ship)
-    {
-        // Explicitly send 0.0 turn input via the Server RPC
-        Ship->Server_SendTurnInput(0.0f);
-        // //UE_LOG(LogSolaraqInput, Verbose, TEXT("HandleTurnCompleted: Sending 0.0 Turn Input"));
-
-        // Optional: Update local pawn immediately if needed for prediction,
-        // but Method 1 relies on server replication anyway.
-        // Ship->SetTurnInputForRoll(0.0f);
-    }
-}
-
-void ASolaraqPlayerController::HandleMoveInput(const FInputActionValue& Value)
-{
-    // Input is typically Vector2D (X=Strafe/Swizzle, Y=Forward/Backward)
-    // Adjust based on your IA_Move configuration (e.g., if it's just 1D float for forward)
-    const float MoveValue = Value.Get<float>(); // Assuming 1D Axis for forward/backward
-
-    ASolaraqShipBase* Ship = GetControlledShip();
-    if (Ship)
-    {
-        // Call the Server RPC on the Pawn
-        Ship->Server_SendMoveForwardInput(MoveValue);
-         // //UE_LOG(LogSolaraqInput, Verbose, TEXT("HandleMoveInput: %.2f"), MoveValue);
-    }
-}
-
-void ASolaraqPlayerController::HandleTurnInput(const FInputActionValue& Value)
-{
-    // Input is typically Float (Yaw Rate)
-    const float TurnValue = Value.Get<float>();
-
-    ASolaraqShipBase* Ship = GetControlledShip();
-    if (Ship)
-    {
-        // Call the Server RPC on the Pawn
-        Ship->Server_SendTurnInput(TurnValue);
-        // //UE_LOG(LogSolaraqInput, Verbose, TEXT("HandleTurnInput: %.2f"), TurnValue);
-    }
-}
-
-void ASolaraqPlayerController::HandleFireMissileRequest(const FInputActionValue& Value)
-{
-    if (!bIsHomingLockActive || !LockedHomingTargetActor.IsValid())
-    {
-        //UE_LOG(LogSolaraqProjectile, Warning, TEXT("Cannot fire homing missile: Lock not active or no valid target locked."));
-        // Optionally play a "failed" sound effect
-        return;
-    }
-
-    ASolaraqShipBase* Ship = GetControlledShip();
-    AActor* Target = LockedHomingTargetActor.Get(); // Get the raw pointer
-    
-    if (Ship && Target)
-    {
-        //UE_LOG(LogSolaraqProjectile, Log, TEXT("Requesting homing fire at locked target: %s"), *Target->GetName());
-        // Call the MODIFIED server RPC on the ship, passing the target
-        Ship->Server_RequestFireHomingMissileAtTarget(Target);
-    }
-    else
-    {
-        //UE_LOG(LogSolaraqProjectile, Error, TEXT("Failed fire request: Ship (%s) or Target (%s) invalid."), Ship ? TEXT("OK") : TEXT("NULL"), Target ? TEXT("OK") : TEXT("NULL"));
-    }
-}
-
-void ASolaraqPlayerController::HandleFireRequest() // Changed parameter list
-{
-    ASolaraqShipBase* Ship = GetControlledShip();
-    if (Ship)
-    {
-        // Call the Server RPC on the Pawn
-        Ship->Server_RequestFire();
-        // //UE_LOG(LogSolaraqInput, Verbose, TEXT("HandleFireRequest called"));
-    }
-}
-
-void ASolaraqPlayerController::HandleBoostStarted(const FInputActionValue& Value)
-{
-    ASolaraqShipBase* Ship = GetControlledShip();
-    if (Ship)
-    {
-        // Call the Server RPC on the Pawn
-        Ship->Server_SetAttemptingBoost(true);
-         // //UE_LOG(LogSolaraqInput, Verbose, TEXT("HandleBoostStarted"));
-    }
-}
-
-void ASolaraqPlayerController::HandleBoostCompleted(const FInputActionValue& Value)
-{
-    ASolaraqShipBase* Ship = GetControlledShip();
-    if (Ship)
-    {
-        // Call the Server RPC on the Pawn
-        Ship->Server_SetAttemptingBoost(false);
-        // //UE_LOG(LogSolaraqInput, Verbose, TEXT("HandleBoostCompleted"));
-    }
-}
-
-void ASolaraqPlayerController::HandleToggleLock()
-{
-    bIsHomingLockActive = !bIsHomingLockActive;
-    UE_LOG(LogSolaraqMarker, Warning, TEXT("PlayerController: Homing Lock Mode Toggled: %s"), bIsHomingLockActive ? TEXT("ACTIVE") : TEXT("INACTIVE"));
-
-    if (bIsHomingLockActive)
-    {
-        UE_LOG(LogSolaraqMarker, Warning, TEXT("Homing Lock ACTIVATED. Starting target scan timer."));
-        // Start scanning immediately and then periodically
-        UpdatePotentialTargets(); // Initial scan
-        GetWorldTimerManager().SetTimer(TimerHandle_ScanTargets, this, &ASolaraqPlayerController::UpdatePotentialTargets, HomingTargetScanInterval, true);
-    }
-    else
-    {
-        UE_LOG(LogSolaraqMarker, Warning, TEXT("Homing Lock DEACTIVATED. Clearing scan timer and target data."));
-        // Stop scanning and clear state
-        GetWorldTimerManager().ClearTimer(TimerHandle_ScanTargets);
-        PotentialHomingTargets.Empty();
-        LockedHomingTargetIndex = -1;
-        LockedHomingTargetActor = nullptr;
-        ClearTargetWidgets(); // Remove UI elements
-    }
-}
-
-void ASolaraqPlayerController::HandleSwitchTarget(const FInputActionValue& Value)
-{
-
-    if (!bIsHomingLockActive)
-    {
-        UE_LOG(LogSolaraqMarker, Warning, TEXT("HandleSwitchTarget(): SwitchTarget ignored: Homing lock not active."));
-        return;
-    }
-
-    if (PotentialHomingTargets.Num() <= 1)
-    {
-        UE_LOG(LogSolaraqMarker, Warning, TEXT("SwitchTarget ignored: Not enough potential targets (%d)."), PotentialHomingTargets.Num());
-        // Need lock active and more than one target to switch
-        return;
-    }
-
-    const float SwitchValue = Value.Get<float>(); // Get axis value (e.g., +1.0 or -1.0 from scroll)
-
-    UE_LOG(LogSolaraqMarker, Warning, TEXT("HandleSwitchTarget Called. SwitchValue: %.2f"), SwitchValue);
-    
-    if (FMath::IsNearlyZero(SwitchValue))
-    {
-        UE_LOG(LogSolaraqMarker, Warning, TEXT("SwitchTarget ignored: SwitchValue is nearly zero."));
-        // Axis event might fire with zero value sometimes, ignore
-        return;
-    }
-
-    int32 Direction = FMath::Sign(SwitchValue); // Get +1 or -1
-    int32 CurrentIndex = LockedHomingTargetIndex;
-    int32 NumTargets = PotentialHomingTargets.Num();
-
-    // Calculate the next index, handling wrap-around
-    int32 NextIndex = (CurrentIndex + Direction + NumTargets) % NumTargets; // Modulo for wrap-around
-
-    UE_LOG(LogSolaraqMarker, Warning, TEXT("Switching Target: CurrentIndex: %d, Direction: %d, NumTargets: %d, NextIndex: %d"),
-        LockedHomingTargetIndex, // Log original LockedHomingTargetIndex before changing
-        Direction,
-        NumTargets,
-        NextIndex);
-    
-    SelectTargetByIndex(NextIndex);
-
-    if(LockedHomingTargetActor.IsValid())
-    {
-        UE_LOG(LogSolaraqMarker, Warning, TEXT("Successfully Switched Target to: %s (Index: %d)"), *LockedHomingTargetActor->GetName(), LockedHomingTargetIndex);
-    }
-    else
-    {
-        UE_LOG(LogSolaraqMarker, Warning, TEXT("Switched Target, but LockedHomingTargetActor is now invalid (Index: %d). This might be an issue."), LockedHomingTargetIndex);
-    }
-    
-    //UE_LOG(LogSolaraqProjectile, Warning, TEXT("Switched Target: Index %d -> %d"), CurrentIndex, LockedHomingTargetIndex);
-}
-
-// --- Optional: Implement GetTeamAttitudeTowards if PlayerController handles team ---
-/*
-ETeamAttitude::Type ASolaraqPlayerController::GetTeamAttitudeTowards(const AActor& Other) const
-{
-    // ... (Implementation similar to previous examples) ...
-}
-*/

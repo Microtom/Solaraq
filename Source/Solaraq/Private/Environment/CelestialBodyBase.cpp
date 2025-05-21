@@ -1,8 +1,6 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Environment/CelestialBodyBase.h" // Adjust path as needed
-
-#include "SWarningOrErrorBox.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "Pawns/SolaraqShipBase.h"        // Adjust path as needed
@@ -207,6 +205,7 @@ void ACelestialBodyBase::OnInfluenceOverlapBegin(UPrimitiveComponent* Overlapped
 			UE_LOG(LogSolaraqSystem, Log, TEXT("CelestialBody '%s': Ship '%s' entered GRAVITY influence."), *GetName(), *Ship->GetName());
 			if (!IsActorTickEnabled())
 			{
+				Ship->SetUnderScalingEffect_Server(true);
 				SetActorTickEnabled(true);
 			}
 		}
@@ -215,40 +214,49 @@ void ACelestialBodyBase::OnInfluenceOverlapBegin(UPrimitiveComponent* Overlapped
 
 void ACelestialBodyBase::OnInfluenceOverlapEnd(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-    ASolaraqShipBase* Ship = Cast<ASolaraqShipBase>(OtherActor);
-    if (Ship && OtherComp == Ship->GetCollisionAndPhysicsRoot())
-    {
-        int32 RemovedCount = AffectedShips.Remove(Ship);
-        if (RemovedCount > 0)
-        {
-            UE_LOG(LogSolaraqSystem, Log, TEXT("CelestialBody '%s': Ship '%s' left GRAVITY influence."), *GetName(), *Ship->GetName());
-            // Reset Ship Scale when leaving main influence sphere is CRITICAL
-            if (IsValid(Ship))
-            {
-                Ship->Client_ResetVisualScale(); // Ensure scale is reset
-            }
-        }
-    }
+	ASolaraqShipBase* Ship = Cast<ASolaraqShipBase>(OtherActor);
+	if (Ship && OtherComp == Ship->GetCollisionAndPhysicsRoot())
+	{
+		int32 RemovedCount = AffectedShips.Remove(Ship);
+		if (RemovedCount > 0)
+		{
+			UE_LOG(LogSolaraqSystem, Log, TEXT("CelestialBody '%s': Ship '%s' left GRAVITY influence."), *GetName(), *Ship->GetName());
+			if (IsValid(Ship))
+			{
+				Ship->Client_ResetVisualScale(); // Ensure scale is reset on client
+				if (HasAuthority()) // Should always be true if called from server's overlap event
+				{
+					Ship->SetUnderScalingEffect_Server(false); // For weapon disabling
+					Ship->SetEffectiveScaleFactor_Server(1.0f); // Reset effective scale for physics
+				}
+			}
+		}
+	}
 }
 
 void ACelestialBodyBase::ApplyEffectsToShip(ASolaraqShipBase* Ship, float DeltaTime)
 {
-    if (!Ship || !Ship->GetCollisionAndPhysicsRoot() || !Ship->GetCollisionAndPhysicsRoot()->IsSimulatingPhysics()) return;
+	if (!Ship || !Ship->GetCollisionAndPhysicsRoot() || !Ship->GetCollisionAndPhysicsRoot()->IsSimulatingPhysics()) return;
 
-    const FVector BodyLocation = GetActorLocation();
-    const FVector ShipLocation = Ship->GetActorLocation();
-    const float Distance = FVector::Dist(BodyLocation, ShipLocation);
+	if (!HasAuthority()) return; // Ensure server-side
 
-    // --- 1. Apply Gravity (Always applies if within InfluenceSphere) ---
-    const FVector GravityForce = CalculateGravityForce(Distance, ShipLocation);
-    Ship->GetCollisionAndPhysicsRoot()->AddForce(GravityForce, NAME_None, false);
+	const FVector BodyLocation = GetActorLocation();
+	const FVector ShipLocation = Ship->GetActorLocation();
+	const float Distance = FVector::Dist(BodyLocation, ShipLocation);
 
-    // --- 2. Calculate and Apply Scaling UNCONDITIONALLY ---
-    // CalculateShipScaleFactor will return 1.0f if Distance >= MaxScalingDistance,
-    // ensuring a smooth transition back to normal size as the ship leaves the scaling sphere.
-    const float TargetScaleFactor = CalculateShipScaleFactor(Distance);
-    //UE_LOG(LogSolaraqCelestials, Warning, TEXT("TargetScaleFactor = %.1f"), TargetScaleFactor);
-    Ship->Client_SetVisualScale(TargetScaleFactor); 
+	// --- 1. Apply Gravity ---
+	const FVector GravityForce = CalculateGravityForce(Distance, ShipLocation);
+	Ship->GetCollisionAndPhysicsRoot()->AddForce(GravityForce, NAME_None, false);
+
+	// --- 2. Calculate and Apply Visual Scaling ---
+	const float TargetScaleFactor = CalculateShipScaleFactor(Distance); // This is already clamped (0.01 to 1.0)
+	Ship->Client_SetVisualScale(TargetScaleFactor); 
+
+	// --- 3. Update Server-Side Scaling State on the Ship (for weapon disabling) ---
+	Ship->SetUnderScalingEffect_Server(!FMath::IsNearlyEqual(TargetScaleFactor, 1.0f));
+
+	// --- 4. Update Server-Side Effective Scale for Physics Adjustments ---
+	Ship->SetEffectiveScaleFactor_Server(TargetScaleFactor); 
 
     // Optional Debug Logging for Gravity
     // UE_LOG(LogSolaraqSystem, VeryVerbose, TEXT("Applying Gravity: %s at Dist: %.1f (Influence Radius: %.1f)"), *GravityForce.ToString(), Distance, MaxInfluenceDistance);

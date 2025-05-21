@@ -73,6 +73,9 @@ void USolaraqBlueprintLogLibrary::LogToSolaraqChannel(
         case ESolaraqLogCategory::Turret:
             LogCategoryName = LogSolaraqTurret.GetCategoryName();
             break;
+        case ESolaraqLogCategory::Transition:
+            LogCategoryName = LogSolaraqTransition.GetCategoryName();
+            break;
         // Add cases for new categories here
         default:
             // Fallback to General if an invalid enum value is somehow passed

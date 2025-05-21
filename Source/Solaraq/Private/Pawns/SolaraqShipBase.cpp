@@ -1,8 +1,6 @@
 // SolaraqShipBase.cpp
 
 #include "Pawns/SolaraqShipBase.h"
-
-#include "AIController.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/SphereComponent.h" // Changed from BoxComponent to SphereComponent for root
@@ -14,13 +12,12 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 //#include "Gameplay/Pickups/SolaraqPickupBase.h"
-#include "EngineUtils.h"
-#include "AI/SolaraqAIController.h"
 #include "Net/UnrealNetwork.h"
 #include "Projectiles/SolaraqHomingProjectile.h"
 #include "Projectiles/SolaraqProjectile.h"
 #include "Components/DockingPadComponent.h" // Include for docking logic
 #include "TimerManager.h" // For potential future timed sequences
+#include "Controllers/SolaraqPlayerController.h"
 
 // Simple Logging Helper Macro
 #define NET_LOG(LogCat, Verbosity, Format, ...) \
@@ -49,6 +46,8 @@ ASolaraqShipBase::ASolaraqShipBase()
     bIsBoosting = false;
     bIsAttemptingBoostInput = false;
     LastBoostStopTime = -1.0f;
+
+    CurrentEffectiveScaleFactor_Server = 1.0f;
     
     CollisionAndPhysicsRoot = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionAndPhysicsRoot"));
     SetRootComponent(CollisionAndPhysicsRoot);
@@ -118,6 +117,9 @@ ASolaraqShipBase::ASolaraqShipBase()
     CurrentDockingStatus = EDockingStatus::None;
     ActiveDockingPad = nullptr;
 
+    NetUpdateFrequency = 160.0f; // Default is often 100, but depends on project. Try 30, 60.
+    MinNetUpdateFrequency = 30.0f;
+    
     UE_LOG(LogSolaraqGeneral, Log, TEXT("ASolaraqShipBase %s Constructed"), *GetName());
 }
 
@@ -213,7 +215,7 @@ void ASolaraqShipBase::Server_RequestFireHomingMissileAtTarget_Implementation(AA
 
 void ASolaraqShipBase::PerformFireHomingMissile(AActor* HomingTarget) 
 {
-    if (!HasAuthority() || IsDead() || !HomingProjectileClass || IsShipDockedOrDocking()) return;
+    if (!HasAuthority() || IsDead() || !HomingProjectileClass || IsShipDockedOrDocking() || bIsUnderScalingEffect_Server) return;
 
     const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
     if (CurrentTime < LastHomingFireTime + HomingMissileFireRate)
@@ -278,10 +280,93 @@ void ASolaraqShipBase::ProcessMoveForwardInput(float Value)
     {
         if (CollisionAndPhysicsRoot && FMath::Abs(Value) > KINDA_SMALL_NUMBER && !IsShipDockedOrDocking())
         {
-            const float ActualThrust = bIsBoosting ? (ThrustForce * BoostThrustMultiplier) : ThrustForce;
+            float BaseThrust = bIsBoosting ? (ThrustForce * BoostThrustMultiplier) : ThrustForce;
+
+            // CONFIGURABLE: This should match the effective minimum scale output by CelestialBodyBase.
+            // For example, if CelestialBodyBase.MinShipScaleFactor is 0.2 and it uses FMath::Max(MinShipScaleFactor, 0.01f),
+            // then this value should be 0.2. If MinShipScaleFactor is 0.0, then this should be 0.01.
+            const float MinEffectiveScaleAtFullReduction = 0.1f; // <<<< ENSURE THIS VALUE matches your CelestialBodyBase's actual minimum output scale.
+
+            float ThrustScaleMultiplier = 1.0f;
+            float AlphaForThrust = 1.0f; // Default to 1.0 if no scaling applied or if scale is 1.0
+
+            // --- Start Logging Block (Optional: Can be commented out for performance once verified) ---
+            /*
+            UE_LOG(LogSolaraqMovement, Log, TEXT("THRUST CALC START --- Ship: %s, InputValue: %.2f"), *GetNameSafe(this), Value);
+            UE_LOG(LogSolaraqMovement, Log, TEXT("  CurrentEffectiveScale_Server: %.4f"), CurrentEffectiveScaleFactor_Server);
+            UE_LOG(LogSolaraqMovement, Log, TEXT("  MinEffectiveScaleAtFullReduction (Hardcoded): %.4f"), MinEffectiveScaleAtFullReduction);
+            UE_LOG(LogSolaraqMovement, Log, TEXT("  MinScaleThrustReductionFactor (Ship UPROPERTY): %.4f"), MinScaleThrustReductionFactor);
+            */
+            // --- End Logging Block ---
+
+            
+            if (CurrentEffectiveScaleFactor_Server < 1.0f && CurrentEffectiveScaleFactor_Server >= MinEffectiveScaleAtFullReduction)
+            {
+                // --- Logging for Condition Met ---
+                /*
+                UE_LOG(LogSolaraqMovement, Log, TEXT("  Condition Met: Scale (%.4f) is < 1.0 and >= MinEffectiveScale (%.4f)"), CurrentEffectiveScaleFactor_Server, MinEffectiveScaleAtFullReduction);
+                */
+
+                // CORRECTED FMath::GetRangePct call: (MinValue, MaxValue, Value)
+                AlphaForThrust = FMath::GetRangePct(MinEffectiveScaleAtFullReduction, 1.0f, CurrentEffectiveScaleFactor_Server);
+                
+                // Clamp alpha: GetRangePct can return outside [0,1] if Value is outside [MinValue,MaxValue].
+                // Our surrounding 'if' condition aims to keep Value within this range for this block,
+                // but clamping is a good safeguard for Lerp.
+                AlphaForThrust = FMath::Clamp(AlphaForThrust, 0.0f, 1.0f);
+
+                // --- Logging for Alpha and Lerp ---
+                /*
+                UE_LOG(LogSolaraqMovement, Log, TEXT("    GetRangePct(Min=%.4f, Max=1.0f, Value=%.4f) -> Clamped AlphaForThrust = %.4f"),
+                    MinEffectiveScaleAtFullReduction, CurrentEffectiveScaleFactor_Server, AlphaForThrust);
+                */
+
+                // Lerp between MinScaleThrustReductionFactor (when Alpha is 0) and 1.0 (when Alpha is 1).
+                ThrustScaleMultiplier = FMath::Lerp(MinScaleThrustReductionFactor, 1.0f, AlphaForThrust);
+                
+                /*
+                UE_LOG(LogSolaraqMovement, Log, TEXT("    Lerp(A=%.4f, B=1.0f, Alpha=%.4f) -> ThrustScaleMultiplier = %.4f"),
+                    MinScaleThrustReductionFactor, AlphaForThrust, ThrustScaleMultiplier);
+                */
+            }
+            else if (CurrentEffectiveScaleFactor_Server < MinEffectiveScaleAtFullReduction)
+            {
+                // --- Logging for Scale Below Minimum ---
+                /*
+                UE_LOG(LogSolaraqMovement, Log, TEXT("  Condition Met: Scale (%.4f) is < MinEffectiveScale (%.4f). Using MinScaleThrustReductionFactor directly."), CurrentEffectiveScaleFactor_Server, MinEffectiveScaleAtFullReduction);
+                */
+                ThrustScaleMultiplier = MinScaleThrustReductionFactor;
+                AlphaForThrust = 0.0f; // Conceptually, Alpha is 0 here
+            }
+            else // Scale is 1.0f or greater (or an unexpected state)
+            {
+                // --- Logging for No Reduction ---
+                /*
+                 UE_LOG(LogSolaraqMovement, Log, TEXT("  Condition NOT Met for reduction: Scale (%.4f) is 1.0 or not in reduction range. ThrustScaleMultiplier remains 1.0."), CurrentEffectiveScaleFactor_Server);
+                */
+                 ThrustScaleMultiplier = 1.0f; // Ensure it's 1.0 if no reduction conditions met
+                 AlphaForThrust = 1.0f;
+            }
+
+            const float ActualThrust = BaseThrust * ThrustScaleMultiplier;
             const FVector ForceDirection = GetActorForwardVector();
             const FVector ForceToAdd = ForceDirection * Value * ActualThrust;
+
+            //NET_LOG(LogSolaraqMovement, Warning, TEXT("ProcessMoveForwardInput (Server): Value: %.2f, bIsBoosting: %d, ThrustForce: %.2f, BoostMult: %.2f, ThrustScaleMult: %.4f"), Value, bIsBoosting, ThrustForce, BoostThrustMultiplier, ThrustScaleMultiplier);
+            FVector CurrentVel = CollisionAndPhysicsRoot ? CollisionAndPhysicsRoot->GetPhysicsLinearVelocity() : FVector::ZeroVector;
+            //NET_LOG(LogSolaraqMovement, Warning, TEXT("ProcessMoveForwardInput (Server): ForceToAdd: %s, CurrentVel Before: %s"), *ForceToAdd.ToString(), *CurrentVel.ToString());
+            
             CollisionAndPhysicsRoot->AddForce(ForceToAdd, NAME_None, false);
+
+            CurrentVel = CollisionAndPhysicsRoot ? CollisionAndPhysicsRoot->GetPhysicsLinearVelocity() : FVector::ZeroVector;
+            //NET_LOG(LogSolaraqMovement, Warning, TEXT("ProcessMoveForwardInput (Server): CurrentVel After AddForce: %s"), *CurrentVel.ToString());
+            
+            // --- Final Thrust Logging ---
+            /*
+            UE_LOG(LogSolaraqMovement, Log, TEXT("  BaseThrust: %.2f, Final ThrustScaleMultiplier: %.4f, ActualThrustApplied: %.2f"),
+                BaseThrust, ThrustScaleMultiplier, ActualThrust);
+            UE_LOG(LogSolaraqMovement, Log, TEXT("THRUST CALC END ---"));
+            */
         }
     }
 }
@@ -301,6 +386,10 @@ void ASolaraqShipBase::ProcessTurnInput(float Value)
 
 void ASolaraqShipBase::Server_SendMoveForwardInput_Implementation(float Value)
 {
+    // This log should appear on the SERVER instance of the ship
+    NET_LOG(LogSolaraqMovement, Warning, TEXT("SERVER SHIP %s: Server_SendMoveForwardInput_Implementation RECEIVED Value: %.2f. Current Authority: %d, IsLocallyControlled: %d"),
+        *GetNameSafe(this), Value, HasAuthority(), IsLocallyControlled());
+    
     const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
     
     // This function now executes ON THE SERVER, called by a client
@@ -434,6 +523,22 @@ void ASolaraqShipBase::Tick(float DeltaTime)
     {
        // ClampVelocity(); // Client-side clamping, use with caution
     }
+
+    if (GetNetMode() == NM_Client && CollisionAndPhysicsRoot) { // THIS BLOCK
+        FVector ClientVel = CollisionAndPhysicsRoot->GetPhysicsLinearVelocity();
+        bool bIsSimulatingPhysics = CollisionAndPhysicsRoot->IsSimulatingPhysics();
+        EDockingStatus ClientDockStatus = CurrentDockingStatus;
+        bool ClientIsDead = bIsDead;
+
+        // MAKE SURE THIS LINE IS UNCOMMENTED AND USING A VISIBLE VERBOSITY
+        /*NET_LOG(LogSolaraqMovement, Warning, TEXT("CLIENT TICK: Vel: %s (Speed: %.2f), SimPhys: %d, DockStatus: %s, IsDead: %d, ActorLoc: %s"),
+            *ClientVel.ToString(),
+            ClientVel.Size(),
+            bIsSimulatingPhysics,
+            *UEnum::GetValueAsString(ClientDockStatus),
+            ClientIsDead,
+            *GetActorLocation().ToString());*/
+    }
 }
 
 void ASolaraqShipBase::ClampVelocity()
@@ -443,7 +548,68 @@ void ASolaraqShipBase::ClampVelocity()
         return;
     }
 
-    const float CurrentMaxSpeed = bIsBoosting ? BoostMaxSpeed : NormalMaxSpeed;
+    float BaseMaxSpeed = bIsBoosting ? BoostMaxSpeed : NormalMaxSpeed;
+
+    // CONFIGURABLE: This should match the effective minimum scale output by CelestialBodyBase.
+    const float MinEffectiveScaleAtFullReduction = 0.1f; // <<<< ENSURE THIS VALUE matches your CelestialBodyBase's actual minimum output scale.
+
+    float SpeedScaleMultiplier = 1.0f;
+    float AlphaForSpeed = 1.0f; // Default to 1.0
+
+    // --- Start Logging Block (Optional) ---
+    /*
+    UE_LOG(LogSolaraqMovement, Log, TEXT("SPEED CALC START --- Ship: %s"), *GetNameSafe(this));
+    UE_LOG(LogSolaraqMovement, Log, TEXT("  CurrentEffectiveScale_Server: %.4f"), CurrentEffectiveScaleFactor_Server);
+    UE_LOG(LogSolaraqMovement, Log, TEXT("  MinEffectiveScaleAtFullReduction (Hardcoded): %.4f"), MinEffectiveScaleAtFullReduction);
+    UE_LOG(LogSolaraqMovement, Log, TEXT("  MinScaleSpeedReductionFactor (Ship UPROPERTY): %.4f"), MinScaleSpeedReductionFactor);
+    */
+    // --- End Logging Block ---
+
+    if (CurrentEffectiveScaleFactor_Server < 1.0f && CurrentEffectiveScaleFactor_Server >= MinEffectiveScaleAtFullReduction)
+    {
+        // --- Logging for Condition Met ---
+        /*
+        UE_LOG(LogSolaraqMovement, Log, TEXT("  Condition Met: Scale (%.4f) is < 1.0 and >= MinEffectiveScale (%.4f)"), CurrentEffectiveScaleFactor_Server, MinEffectiveScaleAtFullReduction);
+        */
+
+        // CORRECTED FMath::GetRangePct call: (MinValue, MaxValue, Value)
+        AlphaForSpeed = FMath::GetRangePct(MinEffectiveScaleAtFullReduction, 1.0f, CurrentEffectiveScaleFactor_Server);
+        
+        // Clamp alpha
+        AlphaForSpeed = FMath::Clamp(AlphaForSpeed, 0.0f, 1.0f);
+        
+        // --- Logging for Alpha and Lerp ---
+        /*
+        UE_LOG(LogSolaraqMovement, Log, TEXT("    GetRangePct(Min=%.4f, Max=1.0f, Value=%.4f) -> Clamped AlphaForSpeed = %.4f"),
+            MinEffectiveScaleAtFullReduction, CurrentEffectiveScaleFactor_Server, AlphaForSpeed);
+        */
+        
+        SpeedScaleMultiplier = FMath::Lerp(MinScaleSpeedReductionFactor, 1.0f, AlphaForSpeed);
+        /*
+        UE_LOG(LogSolaraqMovement, Log, TEXT("    Lerp(A=%.4f, B=1.0f, Alpha=%.4f) -> SpeedScaleMultiplier = %.4f"),
+            MinScaleSpeedReductionFactor, AlphaForSpeed, SpeedScaleMultiplier);
+        */
+    }
+    else if (CurrentEffectiveScaleFactor_Server < MinEffectiveScaleAtFullReduction)
+    {
+        // --- Logging for Scale Below Minimum ---
+        /*
+        UE_LOG(LogSolaraqMovement, Log, TEXT("  Condition Met: Scale (%.4f) is < MinEffectiveScale (%.4f). Using MinScaleSpeedReductionFactor directly."), CurrentEffectiveScaleFactor_Server, MinEffectiveScaleAtFullReduction);
+        */
+        SpeedScaleMultiplier = MinScaleSpeedReductionFactor;
+        AlphaForSpeed = 0.0f; // Conceptually, Alpha is 0 here
+    }
+    else // Scale is 1.0f or greater
+    {
+        // --- Logging for No Reduction ---
+        /*
+        UE_LOG(LogSolaraqMovement, Log, TEXT("  Condition NOT Met for reduction: Scale (%.4f) is 1.0 or not in reduction range. SpeedScaleMultiplier remains 1.0."), CurrentEffectiveScaleFactor_Server);
+        */
+        SpeedScaleMultiplier = 1.0f; // Ensure it's 1.0
+        AlphaForSpeed = 1.0f;
+    }
+    
+    const float CurrentMaxSpeed = BaseMaxSpeed * SpeedScaleMultiplier;
     const float MaxSpeedSq = FMath::Square(CurrentMaxSpeed);
     
     const FVector CurrentVelocity = CollisionAndPhysicsRoot->GetPhysicsLinearVelocity();
@@ -453,7 +619,18 @@ void ASolaraqShipBase::ClampVelocity()
     {
         const FVector ClampedVelocity = CurrentVelocity.GetSafeNormal() * CurrentMaxSpeed;
         CollisionAndPhysicsRoot->SetPhysicsLinearVelocity(ClampedVelocity);
+        // --- Logging for Clamping ---
+        /*
+        UE_LOG(LogSolaraqMovement, Log, TEXT("  Velocity Clamped: From %.2f To %.2f"), CurrentVelocity.Size(), CurrentMaxSpeed);
+        */
     }
+
+    // --- Final Speed Logging ---
+    /*
+    UE_LOG(LogSolaraqMovement, Log, TEXT("  BaseMaxSpeed: %.2f, Final SpeedScaleMultiplier: %.4f, EffectiveMaxSpeed: %.2f, CurrentSpeed: %.2f"),
+        BaseMaxSpeed, SpeedScaleMultiplier, CurrentMaxSpeed, CurrentVelocity.Size());
+    UE_LOG(LogSolaraqMovement, Log, TEXT("SPEED CALC END ---"));
+    */
 }
 
 void ASolaraqShipBase::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -487,6 +664,77 @@ ETeamAttitude::Type ASolaraqShipBase::GetTeamAttitudeTowards(const AActor& Other
         // if (Cast<AAIController>(OtherPawn->GetController())) return ETeamAttitude::Hostile; // Removed this as it makes all AI hostile by default
     }
     return ETeamAttitude::Neutral;
+}
+
+void ASolaraqShipBase::RequestInteraction()
+{
+    // This function is called on the ship instance (could be client or server side initially
+    // depending on where PlayerController::HandleInteractInput is called from).
+    // For level transition, the authority (server for networked game, local for standalone) should handle it.
+    // For simplicity in a single-player context, we can proceed.
+    // If networked, this would likely be an RPC to the server.
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: RequestInteraction() called. CurrentDockingStatus: %s, ActiveDockingPad: %s"),
+            *GetName(), *UEnum::GetValueAsString(CurrentDockingStatus), *GetNameSafe(ActiveDockingPad));
+    
+    if (IsShipDocked() && ActiveDockingPad) // Check if docked and to which pad
+    {
+        AController* CurrentShipController = GetController();
+        
+        if (!CurrentShipController)
+        {
+            UE_LOG(LogSolaraqTransition, Error, TEXT("Ship %s: GetController() returned NULL! Cannot transition."), *GetName());
+            return;
+        }
+
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: GetController() returned: %s (Class: %s). Attempting to cast to ASolaraqPlayerController."),
+            *GetName(), *GetNameSafe(CurrentShipController), *GetNameSafe(CurrentShipController->GetClass()));
+
+        
+        ASolaraqPlayerController* PC = Cast<ASolaraqPlayerController>(CurrentShipController);
+        if (PC)
+        {
+            UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Successfully cast controller to ASolaraqPlayerController (%s). Interaction requested while docked to %s. Telling PC to transition."),
+                *GetName(), *GetNameSafe(PC), *ActiveDockingPad->GetName());
+
+            FName TargetLevelName = TEXT("CharacterTestLevel"); // Default character level name
+            if (!CharacterLevelOverrideName.IsNone())
+            {
+                TargetLevelName = CharacterLevelOverrideName; // Use override if set
+                UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Using CharacterLevelOverrideName: %s"), *GetName(), *TargetLevelName.ToString());
+            }
+            else
+            {
+                UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Using default TargetCharacterLevelName: %s"), *GetName(), *TargetLevelName.ToString());
+            }
+            
+            // Get a unique identifier for the pad (e.g., its name or a custom tag)
+            // This could be used by the character level's GameMode to spawn the player at a specific PlayerStart.
+            FName PadID = ActiveDockingPad->GetFName(); 
+            if (ActiveDockingPad->DockingPadUniqueID != NAME_None) // Prefer the UniqueID if set
+            {
+                PadID = ActiveDockingPad->DockingPadUniqueID;
+                UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Using DockingPadUniqueID for PadID: %s"), *GetName(), *PadID.ToString());
+            }
+            else
+            {
+                UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: DockingPadUniqueID is None for pad %s. Using pad's FName %s as PadID. Ensure PlayerStartTag matches this."), *GetName(), *ActiveDockingPad->GetName(), *PadID.ToString());
+            }
+            
+            PC->InitiateLevelTransitionToCharacter(TargetLevelName, PadID);
+        }
+        else
+        {
+            UE_LOG(LogSolaraqTransition, Error, TEXT("Ship %s: Cast<ASolaraqPlayerController>(GetController()) FAILED. Controller was %s (Class: %s). Cannot transition."),
+                *GetName(), *GetNameSafe(CurrentShipController), *GetNameSafe(CurrentShipController->GetClass()));
+        }
+    }
+    else
+    {
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Interaction requested, but IsShipDocked() is %s or ActiveDockingPad is %s. Cannot transition."),
+            *GetName(),
+            IsShipDocked() ? TEXT("true") : TEXT("false"),
+            ActiveDockingPad ? *ActiveDockingPad->GetName() : TEXT("NULL"));
+    }
 }
 
 void ASolaraqShipBase::OnRep_TurnInputForRoll()
@@ -528,8 +776,9 @@ void ASolaraqShipBase::SetTurnInputForRoll(float TurnValue)
 
 void ASolaraqShipBase::PerformFireWeapon()
 {
-    if (!HasAuthority() || IsDead() || IsShipDockedOrDocking()) return;
+    if (!HasAuthority() || IsDead() || IsShipDockedOrDocking() || bIsUnderScalingEffect_Server) return;
 
+    
     const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
     if (CurrentTime < LastFireTime + FireRate) return;
 
@@ -631,6 +880,15 @@ void ASolaraqShipBase::OnRep_IsDead()
         }
         SetActorEnableCollision(ECollisionEnabled::NoCollision);
         if (CollisionAndPhysicsRoot) CollisionAndPhysicsRoot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+}
+
+void ASolaraqShipBase::SetEffectiveScaleFactor_Server(float NewScaleFactor)
+{
+    if (HasAuthority())
+    {
+        // Clamp the incoming scale factor to be safe, though CelestialBodyBase should already do this.
+        CurrentEffectiveScaleFactor_Server = FMath::Clamp(NewScaleFactor, 0.01f, 1.0f); // Assuming min scale is 0.01
     }
 }
 
@@ -883,6 +1141,15 @@ void ASolaraqShipBase::Internal_DisableSystemsForDocking()
     // Additional systems to disable (e.g., weapon activation) would go here
 }
 
+void ASolaraqShipBase::SetUnderScalingEffect_Server(bool bIsBeingScaled)
+{
+    // This function should only be called on the server.
+    if (HasAuthority())
+    {
+        bIsUnderScalingEffect_Server = bIsBeingScaled;
+    }
+}
+
 void ASolaraqShipBase::Internal_EnableSystemsAfterUndocking()
 {
     NET_LOG(LogSolaraqSystem, Verbose, TEXT("Enabling systems after undocking."));
@@ -926,3 +1193,4 @@ void ASolaraqShipBase::OnRep_DockingStateChanged()
     }
     // BlueprintImplementableEvent OnDockingStatusChangedBP(CurrentDockingStatus, ActiveDockingPad);
 }
+
