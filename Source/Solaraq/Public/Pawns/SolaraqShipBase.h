@@ -80,8 +80,8 @@ public:
 	void RequestInteraction();
 
 	// UPROPERTY specific to storing which pad requested the level change.
-	UPROPERTY(BlueprintReadWrite, Category = "Solaraq|Docking")
-	FName CharacterLevelOverrideName;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Transition")
+	FName CharacterLevelOverrideName; 
 	
 protected:
 	// --- Components ---
@@ -282,17 +282,21 @@ protected: // Keep protected or make EditDefaultsOnly
 	void PerformFireHomingMissile(AActor* HomingTarget);
 	
 	// --- Docking State ---
-
+public:
 	/** Current status of docking. Replicated with notification. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_DockingStateChanged)
 	EDockingStatus CurrentDockingStatus = EDockingStatus::None;
 
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|Docking") // Callable from BP if GameMode is BP
+	void Server_AttemptReestablishDockingAfterLoad();
+	
+protected:
 	/** Reference to the specific docking pad component we are docked/docking to. Replicated with notification. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Solaraq|Docking", ReplicatedUsing = OnRep_DockingStateChanged)
 	TObjectPtr<UDockingPadComponent> ActiveDockingPad;
 
 	// --- Server-Side Movement Logic ---
-protected:
+
 	/** Applies forward/backward force based on input axis value (Server-side). */
 	void ProcessMoveForwardInput(float Value);
 
@@ -427,6 +431,10 @@ protected:
 public:
 	// --- Public Getters ---
 
+	/** Checks if the ship is currently docked and if its ActiveDockingPad has the specified UniqueID. */
+	UFUNCTION(BlueprintPure, Category = "Solaraq|Docking")
+	bool IsDockedToPadID(FName PadUniqueID) const;
+	
 	/** Gets the physics root component (SphereComponent). */
 	FORCEINLINE USphereComponent* GetCollisionAndPhysicsRoot() const { return CollisionAndPhysicsRoot; }
 

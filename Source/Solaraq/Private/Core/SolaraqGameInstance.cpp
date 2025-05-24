@@ -6,36 +6,51 @@ USolaraqGameInstance::USolaraqGameInstance()
 {
 	TargetLevelToLoad = NAME_None;
 	OriginLevelName = NAME_None;
-	DockingPadIdentifier = NAME_None;
+	PlayerStartTagForCharacterLevel = NAME_None; // Renamed from DockingPadIdentifier
+	DockingPadIdentifierToReturnTo = NAME_None;
+	PlayerShipNameInOriginLevel = NAME_None;
+	ShipDockedRelativeRotation = FRotator::ZeroRotator;
 }
 
-void USolaraqGameInstance::PrepareForCharacterLevelLoad(FName InTargetLevel, const FTransform& InShipTransform, FName InOriginLevel, FName InDockingPadID)
+void USolaraqGameInstance::PrepareForCharacterLevelLoad(FName InTargetLevel, const FTransform& InShipTransform, FName InOriginLevel, FName InPlayerStartTag, FName InDockingPadIDToReturnTo, FName InPlayerShipName)
 {
-	TargetLevelToLoad = InTargetLevel;
-	ShipTransformInOriginLevel = InShipTransform;
-	OriginLevelName = InOriginLevel;
-	DockingPadIdentifier = InDockingPadID;
-	UE_LOG(LogSolaraqSystem, Log, TEXT("GameInstance: Preparing for Character Level Load. Target: %s, Origin: %s, PadID: %s"), 
-		*TargetLevelToLoad.ToString(), *OriginLevelName.ToString(), *DockingPadIdentifier.ToString());
+	TargetLevelToLoad = InTargetLevel;                  // Character Level Name
+	ShipTransformInOriginLevel = InShipTransform;       // Ship's world transform in Space Level
+	OriginLevelName = InOriginLevel;                    // Space Level Name (came from)
+	PlayerStartTagForCharacterLevel = InPlayerStartTag; // For CharacterLevelGameMode PlayerStart
+	DockingPadIdentifierToReturnTo = InDockingPadIDToReturnTo; // DockingPadUniqueID for finding ship later
+	PlayerShipNameInOriginLevel = InPlayerShipName;     // Ship's FName for finding ship later
+
+	UE_LOG(LogSolaraqSystem, Log, TEXT("GameInstance: Preparing for Character Level Load. Target: %s, Origin: %s, PlayerStartTag: %s, ReturnPadID: %s, ShipName: %s"),
+		*TargetLevelToLoad.ToString(),
+		*OriginLevelName.ToString(),
+		*PlayerStartTagForCharacterLevel.ToString(),
+		*DockingPadIdentifierToReturnTo.ToString(),
+		*PlayerShipNameInOriginLevel.ToString());
 }
 
-void USolaraqGameInstance::PrepareForShipLevelLoad(FName InTargetLevel, FName InOriginLevel)
+void USolaraqGameInstance::PrepareForShipLevelLoad(FName InTargetShipLevel, FName InCurrentCharacterLevel)
 {
-	TargetLevelToLoad = InTargetLevel;
-	OriginLevelName = InOriginLevel;
-	// ShipTransformInOriginLevel is already set from the previous transition or initial game start
-	// DockingPadIdentifier might not be relevant when returning to ship level directly.
-	UE_LOG(LogSolaraqSystem, Log, TEXT("GameInstance: Preparing for Ship Level Load. Target: %s, Origin: %s"),
+	TargetLevelToLoad = InTargetShipLevel;       // The space level we are returning to.
+	OriginLevelName = InCurrentCharacterLevel; // The character level we are coming from.
+	// PlayerShipNameInOriginLevel and DockingPadIdentifierToReturnTo should still be populated from the initial Ship->Char transition.
+	
+	UE_LOG(LogSolaraqSystem, Log, TEXT("GameInstance: Preparing for Ship Level Load. Target: %s (Space Level), Origin: %s (Char Level)"),
 		*TargetLevelToLoad.ToString(), *OriginLevelName.ToString());
+	UE_LOG(LogSolaraqSystem, Log, TEXT("  Relevant data for re-possessing ship: ShipName='%s', PadID='%s'"),
+		*PlayerShipNameInOriginLevel.ToString(), *DockingPadIdentifierToReturnTo.ToString());
 }
 
 
 void USolaraqGameInstance::ClearTransitionData()
 {
-	// Optionally clear data after it has been used by the GameMode of the new level
-	// TargetLevelToLoad = NAME_None; 
-	// OriginLevelName = NAME_None;
-	// DockingPadIdentifier = NAME_None; 
-	// For now, let's not clear automatically, GameMode can do it.
-	UE_LOG(LogSolaraqSystem, Log, TEXT("GameInstance: Transition data potentially cleared (manual call needed)."));
+	UE_LOG(LogSolaraqSystem, Log, TEXT("GameInstance: Clearing ALL transition data."));
+	TargetLevelToLoad = NAME_None;
+	OriginLevelName = NAME_None;
+	PlayerStartTagForCharacterLevel = NAME_None;
+	DockingPadIdentifierToReturnTo = NAME_None;
+	PlayerShipNameInOriginLevel = NAME_None;
+	ShipTransformInOriginLevel = FTransform::Identity;
+	ShipDockedRelativeRotation = FRotator::ZeroRotator;
+	// Consider more granular clearing if needed, e.g., ClearDataAfterCharacterLoad, ClearDataAfterShipReturn
 }

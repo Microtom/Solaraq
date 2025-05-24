@@ -35,6 +35,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Docking")
 	FName DockingPadUniqueID; 
 
+	
 protected:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -46,6 +47,7 @@ protected:
 	/** Server-side: The ship currently docked or attempting to dock with this pad. */
 	UPROPERTY(Transient) // Server-side cache, not replicated directly by pad
 	TObjectPtr<ASolaraqShipBase> OccupyingShip_Server;
+	
 
 public:
 	/** Called when something begins overlapping the DockingTriggerVolume. */
@@ -78,7 +80,14 @@ public:
 	/** Returns the attach point for the ship (this component itself). */
 	USceneComponent* GetAttachPoint() const { return (USceneComponent*)this; }
 
-
+	/**
+		 * Gets the ship currently occupying this pad.
+		 * WARNING: This is intended for server-side logic. Clients should rely on replicated state from the ship itself.
+		 * @return The ship occupying the pad, or nullptr if free or called on client without authority.
+		 */
+	UFUNCTION(BlueprintPure, Category = "Docking") // Make it BlueprintPure if you might need it in BP
+	ASolaraqShipBase* GetOccupyingShip_Server() const;
+	
 	// --- Later features ---
 	// UPROPERTY(EditDefaultsOnly, Category = "DockingPad")
 	// FVector ShipAttachRelativeOffset;
