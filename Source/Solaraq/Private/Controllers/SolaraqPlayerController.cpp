@@ -425,14 +425,20 @@ ASolaraqCharacterPawn* ASolaraqPlayerController::GetControlledCharacter() const
     return nullptr;
 }
 
-void ASolaraqPlayerController::InitiateLevelTransitionToCharacter(FName TargetLevelName, FName DockingPadID)
+void ASolaraqPlayerController::InitiateLevelTransitionToCharacter(FName TargetLevelName, FName DockingPadID_ForPlayerStart)
 {
-    ASolaraqShipBase* CurrentShip = GetControlledShip();
+    ASolaraqShipBase* CurrentShip = GetControlledShip(); // Use the getter
     if (!CurrentShip)
     {
         UE_LOG(LogSolaraqSystem, Error, TEXT("PlayerController: Cannot transition, no controlled ship."));
         return;
     }
+    if (!CurrentShip->GetActiveDockingPad()) // Ensure ship has an active pad reference
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("PlayerController: Cannot transition, controlled ship %s has no ActiveDockingPad."), *CurrentShip->GetName());
+        return;
+    }
+
 
     USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
     if (!GI)
@@ -441,48 +447,65 @@ void ASolaraqPlayerController::InitiateLevelTransitionToCharacter(FName TargetLe
         return;
     }
 
-    UE_LOG(LogSolaraqSystem, Log, TEXT("PlayerController: Initiating level transition to Character Level: %s (from Pad: %s)"), *TargetLevelName.ToString(), *DockingPadID.ToString());
+    // DockingPadID_ForPlayerStart is passed in directly now, and it should be the DockingPadUniqueID
+    UE_LOG(LogSolaraqSystem, Log, TEXT("PlayerController: Initiating level transition to Character Level: %s (DockingPadID for PlayerStart: %s)"), *TargetLevelName.ToString(), *DockingPadID_ForPlayerStart.ToString());
 
-    // Store necessary info in GameInstance
-    FString CurrentLevelName = GetWorld()->GetName();
-    GI->PrepareForCharacterLevelLoad(TargetLevelName, CurrentShip->GetActorTransform(), FName(*CurrentLevelName), DockingPadID);
+    FString CurrentSpaceLevelName = GetWorld()->GetName();
+    FName PlayerShipActorName = CurrentShip->GetFName();
+    // ActualDockingPadUniqueID is the SAME as DockingPadID_ForPlayerStart in this context,
+    // because the ship passes its pad's UniqueID when it calls this function.
+    FName ActualDockingPadUniqueIDToReturnTo = DockingPadID_ForPlayerStart; 
 
-    // Unpossess the ship BEFORE loading the new level
-    UnPossess(); 
-    if (IsValid(PossessedShipPawn))
+    if (ActualDockingPadUniqueIDToReturnTo == NAME_None)
     {
-        // Don't destroy the ship, it stays in the space level.
-        // We just clear our reference to it as the "actively possessed ship pawn" for the controller.
-        // The GameInstance holds its transform.
+         UE_LOG(LogSolaraqSystem, Warning, TEXT("PlayerController: ActiveDockingPad %s has no DockingPadUniqueID set (passed as DockingPadID_ForPlayerStart). Returning to this specific pad might fail."), *CurrentShip->GetActiveDockingPad()->GetName());
     }
-    PossessedShipPawn = nullptr; // Clear our direct reference, GI has the info
+    
+    // DockingPadID_ForPlayerStart is the tag for PlayerStart in CharacterLevel
+    // ActualDockingPadUniqueIDToReturnTo is also this same ID, used for finding the ship when returning to space.
+    GI->PrepareForCharacterLevelLoad(TargetLevelName, CurrentShip->GetActorTransform(), FName(*CurrentSpaceLevelName), DockingPadID_ForPlayerStart, ActualDockingPadUniqueIDToReturnTo, PlayerShipActorName);
 
-    // Load the new level
+    UnPossess();
+    PossessedShipPawn = nullptr; 
+
     UGameplayStatics::OpenLevel(this, TargetLevelName);
 }
 
-void ASolaraqPlayerController::InitiateLevelTransitionToShip(FName TargetShipLevelName)
+void ASolaraqPlayerController::InitiateLevelTransitionToShip(FName InTargetShipLevelName) // Changed parameter name for clarity, this IS the name from GI
 {
     USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
     if (!GI)
     {
-        UE_LOG(LogSolaraqSystem, Error, TEXT("PlayerController: Cannot transition to ship, GameInstance is invalid."));
+        UE_LOG(LogSolaraqTransition, Error, TEXT("PC %s: InitiateLevelTransitionToShip - GameInstance is NULL!"), *GetNameSafe(this));
         return;
     }
 
-    UE_LOG(LogSolaraqSystem, Log, TEXT("PlayerController: Initiating level transition to Ship Level: %s"), *TargetShipLevelName.ToString());
-
-    FString CurrentLevelName = GetWorld()->GetName();
-    GI->PrepareForShipLevelLoad(TargetShipLevelName, FName(*CurrentLevelName));
-
-    UnPossess(); // Unpossess character
-    if (IsValid(PossessedCharacterPawn))
+    // InTargetShipLevelName is the parameter passed to this function.
+    // It should be the GI->OriginLevelName (the space level) when called from HandleInteractInput.
+    if (InTargetShipLevelName == NAME_None)
     {
-        PossessedCharacterPawn->Destroy(); // Destroy character when leaving character level
+        UE_LOG(LogSolaraqTransition, Error, TEXT("PC %s: InitiateLevelTransitionToShip - InTargetShipLevelName parameter is NONE. Cannot return to ship level."), *GetNameSafe(this));
+        return;
     }
-    PossessedCharacterPawn = nullptr;
 
-    UGameplayStatics::OpenLevel(this, TargetShipLevelName);
+    UE_LOG(LogSolaraqTransition, Log, TEXT("PC %s: InitiateLevelTransitionToShip - Requesting to load level: '%s' (This should be the original space level)"),
+        *GetNameSafe(this), *InTargetShipLevelName.ToString());
+
+    FString CurrentCharacterLevelName = GetWorld()->GetName();
+    // GI->PrepareForShipLevelLoad uses the InTargetShipLevelName (which is the target space level)
+    // and the current character level name.
+    GI->PrepareForShipLevelLoad(InTargetShipLevelName, FName(*CurrentCharacterLevelName));
+
+    UnPossess();
+    // ASolaraqCharacterPawn* CurrentChar = GetControlledCharacter(); // This line can be problematic if called after UnPossess if GetControlledCharacter relies on GetPawn()
+    // It's safer to use the PossessedCharacterPawn directly if unpossessing first.
+    if (IsValid(PossessedCharacterPawn)) // Use the cached pointer
+    {
+        PossessedCharacterPawn->Destroy();
+    }
+    PossessedCharacterPawn = nullptr; // Clear the cached pointer
+
+    UGameplayStatics::OpenLevel(this, InTargetShipLevelName); // Use the parameter here
 }
 
 // --- EXISTING SHIP INPUT HANDLERS (Ensure they check CurrentControlMode or use GetControlledShip()) ---
@@ -646,16 +669,33 @@ void ASolaraqPlayerController::HandleSwitchTarget(const FInputActionValue& Value
 
 void ASolaraqPlayerController::HandleInteractInput()
 {
-    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: HandleInteractInput TRIGGERED! CurrentControlMode: %s"),
-        *GetNameSafe(this), (CurrentControlMode == EPlayerControlMode::Ship ? TEXT("Ship") : TEXT("Character")));
-    
+    // --- START OF DETAILED LOGGING ---
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: ================= HandleInteractInput DETAILED LOG START ================="), *GetNameSafe(this));
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: Current Level: %s"), *GetNameSafe(this), *GetWorld()->GetName());
+
+    APawn* MyPawn = GetPawn();
+    if (!MyPawn)
+    {
+        UE_LOG(LogSolaraqTransition, Error, TEXT("PC %s: GetPawn() returned NULL. Cannot determine control mode or interact."), *GetNameSafe(this));
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: ================= HandleInteractInput DETAILED LOG END (NULL PAWN) ================="), *GetNameSafe(this));
+        return;
+    }
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: Currently possessing Pawn: %s (Class: %s)"), *GetNameSafe(this), *GetNameSafe(MyPawn), *GetNameSafe(MyPawn->GetClass()));
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: CurrentControlMode variable: %s"), *GetNameSafe(this),
+        (CurrentControlMode == EPlayerControlMode::Ship ? TEXT("Ship") : (CurrentControlMode == EPlayerControlMode::Character ? TEXT("Character") : TEXT("UNKNOWN"))));
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: PossessedShipPawn variable: %s"), *GetNameSafe(this), *GetNameSafe(PossessedShipPawn));
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: PossessedCharacterPawn variable: %s"), *GetNameSafe(this), *GetNameSafe(PossessedCharacterPawn));
+    // --- END OF INITIAL DIAGNOSTIC LOGS ---
+
+
     if (CurrentControlMode == EPlayerControlMode::Ship)
     {
         ASolaraqShipBase* Ship = GetControlledShip();
         if (Ship && Ship->IsShipDocked()) // Only allow interaction if fully docked
         {
             // The ship itself will handle finding the pad and what "Interact" means
-            Ship->RequestInteraction(); 
+            // Ship->RequestInteraction() will eventually call PC->InitiateLevelTransitionToCharacter
+            Ship->RequestInteraction();
             UE_LOG(LogSolaraqTransition, Warning, TEXT("PlayerController: Sent Interact request to docked ship %s."), *Ship->GetName());
         }
         else if (Ship)
@@ -669,26 +709,50 @@ void ASolaraqPlayerController::HandleInteractInput()
     }
     else if (CurrentControlMode == EPlayerControlMode::Character)
     {
-        ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: CurrentControlMode is CHARACTER."), *GetNameSafe(this));
+        ASolaraqCharacterPawn* CharPawn = GetControlledCharacter(); // This uses PossessedCharacterPawn internally if mode is Character
         if (CharPawn)
         {
-            // TODO: Implement character interaction logic (e.g., find nearby interactable actor)
-            UE_LOG(LogSolaraqTransition, Warning, TEXT("PlayerController: Character Interact pressed. (Not yet implemented fully)"));
-            // For now, let's add a temporary way to get back to the ship level for testing
-            // This would normally be triggered by interacting with the ship's "door" in the character level.
+            UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: GetControlledCharacter() returned: %s. Attempting to return to ship level."), *GetNameSafe(this), *GetNameSafe(CharPawn));
             USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
-            if (GI && GI->OriginLevelName != NAME_None) // Check if we have an origin level to return to
+            if (GI)
             {
-                InitiateLevelTransitionToShip(GI->OriginLevelName);
+                FName SpaceLevelToReturnTo = GI->OriginLevelName;
+
+                UE_LOG(LogSolaraqTransition, Log, TEXT("PC %s: DEBUG: GI->OriginLevelName (Space Level to return to): '%s'"),
+                    *GetNameSafe(this), *SpaceLevelToReturnTo.ToString());
+                UE_LOG(LogSolaraqTransition, Log, TEXT("PC %s: DEBUG: GI->PlayerShipNameInOriginLevel: '%s'"),
+                    *GetNameSafe(this), *GI->PlayerShipNameInOriginLevel.ToString());
+                UE_LOG(LogSolaraqTransition, Log, TEXT("PC %s: DEBUG: GI->DockingPadIdentifierToReturnTo: '%s'"),
+                    *GetNameSafe(this), *GI->DockingPadIdentifierToReturnTo.ToString());
+
+
+                if (SpaceLevelToReturnTo != NAME_None)
+                {
+                    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: GI->OriginLevelName is valid. Calling InitiateLevelTransitionToShip with '%s'."), *GetNameSafe(this), *SpaceLevelToReturnTo.ToString());
+                    InitiateLevelTransitionToShip(SpaceLevelToReturnTo);
+                }
+                else
+                {
+                    UE_LOG(LogSolaraqTransition, Error, TEXT("PC %s: Cannot transition to ship. GameInstance OriginLevelName (for space level) is not set or is None."), *GetNameSafe(this));
+                }
             }
+            else
+            {
+                UE_LOG(LogSolaraqTransition, Error, TEXT("PC %s: GetGameInstance<USolaraqGameInstance>() returned NULL."), *GetNameSafe(this));
+            }
+        }
+        else
+        {
+            UE_LOG(LogSolaraqTransition, Error, TEXT("PC %s: CurrentControlMode is CHARACTER, but GetControlledCharacter() returned NULL."), *GetNameSafe(this));
         }
     }
     else
     {
-        UE_LOG(LogSolaraqTransition, Warning, TEXT("PlayerController: Interact pressed, but CurrentControlMode is unknown/invalid."));
+        UE_LOG(LogSolaraqTransition, Error, TEXT("PC %s: CurrentControlMode is UNKNOWN/INVALID (%d). Interaction ignored."), *GetNameSafe(this), static_cast<int32>(CurrentControlMode));
     }
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("PC %s: ================= HandleInteractInput DETAILED LOG END ================="), *GetNameSafe(this));
 }
-
 
 // --- Homing Lock System Functions (Ensure they are present and check CurrentControlMode if necessary) ---
 // IMPORTANT: You need to copy your full implementations for these from your original SolaraqPlayerController.cpp

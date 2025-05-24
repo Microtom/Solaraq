@@ -36,9 +36,10 @@ void ACharacterLevelGameMode::InitGame(const FString& MapName, const FString& Op
     USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
     if (GI)
     {
-        UE_LOG(LogSolaraqSystem, Log, TEXT("CharacterLevelGameMode: InitGame. Transitioning from Pad ID: %s (Origin: %s)"), 
-            *GI->DockingPadIdentifier.ToString(), *GI->OriginLevelName.ToString());
-        // Here you could use GI->DockingPadIdentifier to select a specific PlayerStart
+        // Changed GI->DockingPadIdentifier to GI->PlayerStartTagForCharacterLevel
+        UE_LOG(LogSolaraqSystem, Log, TEXT("CharacterLevelGameMode: InitGame. Transitioning from Pad ID (now PlayerStartTag): %s (Origin: %s)"),
+            *GI->PlayerStartTagForCharacterLevel.ToString(), *GI->OriginLevelName.ToString());
+        // Here you could use GI->PlayerStartTagForCharacterLevel to select a specific PlayerStart
     }
 }
 
@@ -80,22 +81,31 @@ void ACharacterLevelGameMode::RestartPlayer(AController* NewPlayer)
 AActor* ACharacterLevelGameMode::FindPlayerStart_Implementation(AController* Player, const FString& IncomingName)
 {
     USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
-    if (GI && !GI->DockingPadIdentifier.IsNone())
+    // Use the corrected variable name here:
+    if (GI && !GI->PlayerStartTagForCharacterLevel.IsNone())
     {
-        // Try to find a PlayerStart tagged with the DockingPadIdentifier
+        // Try to find a PlayerStart tagged with the PlayerStartTagForCharacterLevel
         for (TActorIterator<APlayerStart> It(GetWorld()); It; ++It)
         {
             APlayerStart* PlayerStart = *It;
-            if (PlayerStart && PlayerStart->PlayerStartTag == GI->DockingPadIdentifier)
+            if (PlayerStart && PlayerStart->PlayerStartTag == GI->PlayerStartTagForCharacterLevel) // Use corrected name
             {
-                UE_LOG(LogSolaraqSystem, Log, TEXT("CharacterLevelGameMode: Found tagged PlayerStart '%s' for Pad ID '%s'."), 
-                    *PlayerStart->GetName(), *GI->DockingPadIdentifier.ToString());
+                UE_LOG(LogSolaraqSystem, Log, TEXT("CharacterLevelGameMode: Found tagged PlayerStart '%s' for Pad ID '%s'."),
+                    *PlayerStart->GetName(), *GI->PlayerStartTagForCharacterLevel.ToString()); // Use corrected name
                 return PlayerStart;
             }
         }
-        UE_LOG(LogSolaraqSystem, Warning, TEXT("CharacterLevelGameMode: No PlayerStart found with tag '%s'. Using default."), *GI->DockingPadIdentifier.ToString());
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("CharacterLevelGameMode: No PlayerStart found with tag '%s'. Using default."), *GI->PlayerStartTagForCharacterLevel.ToString()); // Use corrected name
     }
-    
+    else if (GI)
+    {
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("CharacterLevelGameMode: GI valid, but PlayerStartTagForCharacterLevel is None. Using default PlayerStart."));
+    }
+    else
+    {
+         UE_LOG(LogSolaraqSystem, Warning, TEXT("CharacterLevelGameMode: GI is NULL. Using default PlayerStart."));
+    }
+
     // Fallback to default PlayerStart finding logic
     return Super::FindPlayerStart_Implementation(Player, IncomingName);
 }

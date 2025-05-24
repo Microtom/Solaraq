@@ -12,12 +12,14 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 //#include "Gameplay/Pickups/SolaraqPickupBase.h"
+#include "EngineUtils.h"
 #include "Net/UnrealNetwork.h"
 #include "Projectiles/SolaraqHomingProjectile.h"
 #include "Projectiles/SolaraqProjectile.h"
 #include "Components/DockingPadComponent.h" // Include for docking logic
 #include "TimerManager.h" // For potential future timed sequences
 #include "Controllers/SolaraqPlayerController.h"
+#include "Core/SolaraqGameInstance.h"
 
 // Simple Logging Helper Macro
 #define NET_LOG(LogCat, Verbosity, Format, ...) \
@@ -186,6 +188,14 @@ void ASolaraqShipBase::BeginPlay()
     {
         CurrentHealth = MaxHealth;
         bIsDead = false;
+
+        FTimerHandle DummyTimerHandle; 
+        float DelayDuration = 0.2f; // Or your chosen delay
+        GetWorldTimerManager().SetTimer(DummyTimerHandle, this, &ASolaraqShipBase::Server_AttemptReestablishDockingAfterLoad, DelayDuration, false);
+        
+        float CurrentTime = GetWorld() ? GetWorld()->TimeSeconds : -1.f;
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s BeginPlay: Scheduled Server_AttemptReestablishDockingAfterLoad with %.2fs delay. Current Time: %.2f"),
+            *GetName(), DelayDuration, CurrentTime);
     }
     
     UE_LOG(LogSolaraqGeneral, Log, TEXT("ASolaraqShipBase %s BeginPlay called."), *GetName());
@@ -267,6 +277,136 @@ void ASolaraqShipBase::PerformFireHomingMissile(AActor* HomingTarget)
     {
         UE_LOG(LogSolaraqProjectile, Error, TEXT("%s PerformFireHomingMissile: Failed to spawn HomingProjectile!"), *GetName());
     }
+}
+
+
+void ASolaraqShipBase::Server_AttemptReestablishDockingAfterLoad()
+{
+    if (!HasAuthority()) return;
+
+    float CurrentTime = GetWorld() ? GetWorld()->TimeSeconds : -1.f;
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Server_AttemptReestablishDockingAfterLoad called. World: %s, Time: %.2f"),
+        *GetName(), *GetWorld()->GetName(), CurrentTime);
+    
+    USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
+    if (!GI)
+    {
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("  GI is null. Cannot re-establish docking."), *GetName());
+        return;
+    }
+
+    // Check if this ship is the one intended for re-docking
+    // And if there's a target pad ID
+    if (GI->PlayerShipNameInOriginLevel != GetFName() || GI->DockingPadIdentifierToReturnTo == NAME_None)
+    {
+        if (GI->PlayerShipNameInOriginLevel != GetFName())
+        {
+            UE_LOG(LogSolaraqSystem, Log, TEXT("  This ship (%s) is not the target ship in GI (%s). Skipping re-dock."), *GetFName().ToString(), *GI->PlayerShipNameInOriginLevel.ToString());
+        }
+        if (GI->DockingPadIdentifierToReturnTo == NAME_None)
+        {
+            UE_LOG(LogSolaraqSystem, Log, TEXT("  DockingPadIdentifierToReturnTo in GI is None. Skipping re-dock."));
+        }
+        // GI->ClearTransitionData(); // Optionally clear GI data if this ship is not the one, or it's done trying.
+        return;
+    }
+
+    UE_LOG(LogSolaraqTransition, Warning, TEXT("  This ship (%s) HAS 'PlayerShip_Persistent' tag. Looking for Pad ID: %s. Time: %.2f"),
+        *GetName(), *GI->DockingPadIdentifierToReturnTo.ToString(), CurrentTime);
+    
+    UDockingPadComponent* TargetPad = nullptr;
+    for (TActorIterator<AActor> It(GetWorld()); It; ++It) // Iterate all actors
+    {
+        AActor* FoundActor = *It;
+        // Find all DockingPadComponents on each actor
+        TArray<UDockingPadComponent*> PadsOnActor;
+        FoundActor->GetComponents<UDockingPadComponent>(PadsOnActor);
+        for (UDockingPadComponent* PadComponent : PadsOnActor)
+        {
+            if (PadComponent && PadComponent->DockingPadUniqueID == GI->DockingPadIdentifierToReturnTo)
+            {
+                TargetPad = PadComponent;
+                UE_LOG(LogSolaraqSystem, Log, TEXT("  Found matching DockingPadComponent: %s on Actor %s"), *TargetPad->GetName(), *FoundActor->GetName());
+                break; 
+            }
+        }
+        if (TargetPad) break;
+    }
+
+    if (!TargetPad)
+    {
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("  Could not find DockingPadComponent with ID %s in the world. Time: %.2f"),
+            *GI->DockingPadIdentifierToReturnTo.ToString(), CurrentTime);// Clear data as we can't use it
+        return;
+    }
+
+    if (!TargetPad->IsPadFree_Server())
+    {
+        ASolaraqShipBase* OccupyingShip = TargetPad->GetOccupyingShip_Server();
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("  Target Pad %s is not free. Currently occupied by %s. Cannot re-dock this ship (%s)."),
+            *TargetPad->GetName(), *GetNameSafe(OccupyingShip), *GetName());
+        GI->ClearTransitionData(); // Clear data
+        return;
+    }
+
+    // If we reach here, we are this ship, found the target pad, and it's free.
+    UE_LOG(LogSolaraqSystem, Log, TEXT("  Target Pad %s is free. Attempting to re-dock ship %s."), *TargetPad->GetName(), *GetName());
+
+    // If the ship is already somehow docked (e.g. persistence worked perfectly), just ensure state.
+    // Or if it's very close to the pad, we might just snap and set docked state without full lerp.
+    // For now, let's assume it might be anywhere (e.g., spawned at PlayerStart if re-possess failed initially).
+
+    // Force undock if by some miracle it was docked to something else or in a weird state.
+    if (IsShipDockedOrDocking())
+    {
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("  Ship %s was already in a docking state (%s with %s). Forcing undock before re-docking to target pad %s."),
+            *GetName(), *UEnum::GetValueAsString(CurrentDockingStatus), *GetNameSafe(ActiveDockingPad), *TargetPad->GetName());
+        Server_RequestUndock(); // This will clear ActiveDockingPad and set status to None.
+    }
+    
+    // Move the ship to the docking pad's attach point
+    // This is a hard snap; alternatively, you could initiate a short lerp.
+    if (TargetPad->GetAttachPoint())
+    {
+        FRotator RelativeRotationToApply = FRotator::ZeroRotator; // Default
+        if (GI)
+        {
+            RelativeRotationToApply = GI->ShipDockedRelativeRotation;
+            UE_LOG(LogSolaraqSystem, Log, TEXT("  Using saved relative rotation from GI: %s"), *RelativeRotationToApply.ToString());
+        } else {
+            UE_LOG(LogSolaraqSystem, Warning, TEXT("  GI is NULL when trying to get saved rotation. Defaulting to ZeroRotator."));
+        }
+
+
+        FTransform TargetPadAttachTransform = TargetPad->GetAttachPoint()->GetComponentTransform();
+        
+        // Calculate the desired WORLD rotation based on the pad's world rotation and the saved relative rotation
+        FQuat PadWorldQuat = TargetPadAttachTransform.GetRotation();
+        FQuat RelativeQuat = FQuat(RelativeRotationToApply);
+        FQuat FinalWorldQuat = PadWorldQuat * RelativeQuat; // Apply relative to pad's orientation
+        FRotator FinalWorldRotation = FinalWorldQuat.Rotator();
+
+        // Location snapping (DockingTargetRelativeLocation is usually ZeroVector for direct attach point docking)
+        FVector FinalWorldLocation = TargetPadAttachTransform.TransformPosition(DockingTargetRelativeLocation);
+
+        SetActorLocationAndRotation(FinalWorldLocation, FinalWorldRotation);
+        UE_LOG(LogSolaraqSystem, Log, TEXT("  Snapped ship %s to Pad %s location. Applied world rotation: %s (from relative: %s)"),
+            *GetName(), *TargetPad->GetName(), *FinalWorldRotation.ToString(), *RelativeRotationToApply.ToString());
+    }
+    else
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("  Target Pad %s has no valid AttachPoint component! Cannot snap location."), *TargetPad->GetName());
+        GI->ClearTransitionData();
+        return;
+    }
+
+    // Now, formally request docking with this pad.
+    // This will handle physics, attachment, status updates, etc.
+    Server_RequestDockWithPad(TargetPad);
+
+    // Successfully used the data, clear it from GI
+    GI->ClearTransitionData();
+    UE_LOG(LogSolaraqSystem, Log, TEXT("  Re-docking process initiated for ship %s with pad %s. GI transition data cleared."), *GetName(), *TargetPad->GetName());
 }
 
 void ASolaraqShipBase::Server_SetAttemptingBoost_Implementation(bool bAttempting)
@@ -482,7 +622,17 @@ void ASolaraqShipBase::Tick(float DeltaTime)
                 Internal_DisableSystemsForDocking(); 
 
                 NET_LOG(LogSolaraqSystem, Log, TEXT("Ship %s finished lerping to dock position. Status: Docked. Final RelRot: %s"), *GetName(), *NewRelativeRotation.ToString());
-                OnRep_DockingStateChanged(); 
+
+                USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
+                if (GI && ActiveDockingPad) // Ensure we have an active pad to associate this rotation with
+                {
+                    GI->ShipDockedRelativeRotation = ActualDockingTargetRelativeRotation; // This is already relative
+                    UE_LOG(LogSolaraqSystem, Log, TEXT("Ship %s: Saved docked relative rotation %s to GameInstance."),
+                        *GetName(), *ActualDockingTargetRelativeRotation.ToString());
+                }
+                
+                OnRep_DockingStateChanged();
+                
             }
         }
         // --- End Docking Lerp Logic ---
@@ -671,8 +821,7 @@ void ASolaraqShipBase::RequestInteraction()
     // This function is called on the ship instance (could be client or server side initially
     // depending on where PlayerController::HandleInteractInput is called from).
     // For level transition, the authority (server for networked game, local for standalone) should handle it.
-    // For simplicity in a single-player context, we can proceed.
-    // If networked, this would likely be an RPC to the server.
+    
     UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: RequestInteraction() called. CurrentDockingStatus: %s, ActiveDockingPad: %s"),
             *GetName(), *UEnum::GetValueAsString(CurrentDockingStatus), *GetNameSafe(ActiveDockingPad));
     
@@ -686,39 +835,36 @@ void ASolaraqShipBase::RequestInteraction()
             return;
         }
 
-        UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: GetController() returned: %s (Class: %s). Attempting to cast to ASolaraqPlayerController."),
-            *GetName(), *GetNameSafe(CurrentShipController), *GetNameSafe(CurrentShipController->GetClass()));
-
+        // UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: GetController() returned: %s (Class: %s). Attempting to cast to ASolaraqPlayerController."),
+        //     *GetName(), *GetNameSafe(CurrentShipController), *GetNameSafe(CurrentShipController->GetClass()));
         
         ASolaraqPlayerController* PC = Cast<ASolaraqPlayerController>(CurrentShipController);
         if (PC)
         {
-            UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Successfully cast controller to ASolaraqPlayerController (%s). Interaction requested while docked to %s. Telling PC to transition."),
+            UE_LOG(LogSolaraqTransition, Log, TEXT("Ship %s: Successfully cast controller to ASolaraqPlayerController (%s). Interaction requested while docked to %s. Telling PC to transition."),
                 *GetName(), *GetNameSafe(PC), *ActiveDockingPad->GetName());
 
             FName TargetLevelName = TEXT("CharacterTestLevel"); // Default character level name
             if (!CharacterLevelOverrideName.IsNone())
             {
                 TargetLevelName = CharacterLevelOverrideName; // Use override if set
-                UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Using CharacterLevelOverrideName: %s"), *GetName(), *TargetLevelName.ToString());
+                UE_LOG(LogSolaraqTransition, Log, TEXT("Ship %s: Using CharacterLevelOverrideName: %s"), *GetName(), *TargetLevelName.ToString());
             }
             else
             {
-                UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Using default TargetCharacterLevelName: %s"), *GetName(), *TargetLevelName.ToString());
+                UE_LOG(LogSolaraqTransition, Log, TEXT("Ship %s: Using default TargetCharacterLevelName: %s"), *GetName(), *TargetLevelName.ToString());
             }
             
-            // Get a unique identifier for the pad (e.g., its name or a custom tag)
-            // This could be used by the character level's GameMode to spawn the player at a specific PlayerStart.
             FName PadID = ActiveDockingPad->GetFName(); 
-            if (ActiveDockingPad->DockingPadUniqueID != NAME_None) // Prefer the UniqueID if set
+            if (ActiveDockingPad->DockingPadUniqueID != NAME_None) 
             {
                 PadID = ActiveDockingPad->DockingPadUniqueID;
-                UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Using DockingPadUniqueID for PadID: %s"), *GetName(), *PadID.ToString());
+                // UE_LOG(LogSolaraqTransition, Log, TEXT("Ship %s: Using DockingPadUniqueID for PadID: %s"), *GetName(), *PadID.ToString());
             }
-            else
-            {
-                UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: DockingPadUniqueID is None for pad %s. Using pad's FName %s as PadID. Ensure PlayerStartTag matches this."), *GetName(), *ActiveDockingPad->GetName(), *PadID.ToString());
-            }
+            // else
+            // {
+            //     UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: DockingPadUniqueID is None for pad %s. Using pad's FName %s as PadID. Ensure PlayerStartTag matches this."), *GetName(), *ActiveDockingPad->GetName(), *PadID.ToString());
+            // }
             
             PC->InitiateLevelTransitionToCharacter(TargetLevelName, PadID);
         }
@@ -988,8 +1134,18 @@ void ASolaraqShipBase::Server_RequestDockWithPad_Implementation(UDockingPadCompo
         GetRootComponent()->AttachToComponent(LerpAttachTargetComponent, AttachRules);
 
         const FTransform PadWorldTransform = LerpAttachTargetComponent->GetComponentTransform();
-        ActualDockingTargetRelativeRotation = (PadWorldTransform.GetRotation().Inverse() * FQuat(ShipWorldRotationAtDockStart)).Rotator();
+        
 
+        // --- SAVE DOCKED ROTATION TO GAME INSTANCE ---
+        USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
+        if (GI)
+        {
+            ActualDockingTargetRelativeRotation = (PadWorldTransform.GetRotation().Inverse() * FQuat(ShipWorldRotationAtDockStart)).Rotator();
+            GI->ShipDockedRelativeRotation = ActualDockingTargetRelativeRotation;
+            UE_LOG(LogSolaraqSystem, Log, TEXT("Ship %s: Saved initial docked relative rotation %s to GameInstance. This will be the lerp target."),
+                *GetName(), *ActualDockingTargetRelativeRotation.ToString());
+        }
+        
         NET_LOG(LogSolaraqSystem, Verbose, TEXT("Ship %s: WorldRotAtDockStart: %s, PadWorldRot: %s, TargetRelRot: %s"),
             *GetName(), *ShipWorldRotationAtDockStart.ToString(), *PadWorldTransform.GetRotation().Rotator().ToString(), *ActualDockingTargetRelativeRotation.ToString());
         
@@ -1154,6 +1310,17 @@ void ASolaraqShipBase::Internal_EnableSystemsAfterUndocking()
 {
     NET_LOG(LogSolaraqSystem, Verbose, TEXT("Enabling systems after undocking."));
     // Re-enable systems
+}
+
+bool ASolaraqShipBase::IsDockedToPadID(FName PadUniqueID) const
+{
+    if (IsShipDocked() && ActiveDockingPad)
+    {
+        // Ensure DockingPadUniqueID is set on the pad component in the editor or its construction script.
+        // If DockingPadUniqueID is NAME_None, this check will fail unless PadUniqueID is also NAME_None.
+        return ActiveDockingPad->DockingPadUniqueID == PadUniqueID;
+    }
+    return false;
 }
 
 void ASolaraqShipBase::OnRep_DockingStateChanged()

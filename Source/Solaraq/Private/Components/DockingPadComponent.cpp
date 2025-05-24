@@ -30,6 +30,20 @@ void UDockingPadComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// --- LOGGING FOR PAD INITIALIZATION ---
+	AActor* MyOwner = GetOwner();
+	FString OwnerName = MyOwner ? MyOwner->GetName() : TEXT("UNKNOWN_OWNER");
+	FString WorldName = GetWorld() ? GetWorld()->GetName() : TEXT("UNKNOWN_WORLD");
+	float CurrentTime = GetWorld() ? GetWorld()->TimeSeconds : -1.f;
+
+	UE_LOG(LogSolaraqTransition, Warning, TEXT("DockingPadComponent BEGINPLAY: Name: %s, Owner: %s, UniqueID: %s, World: %s, Time: %.2f"),
+		*GetName(),
+		*OwnerName,
+		*DockingPadUniqueID.ToString(), // Make sure DockingPadUniqueID is set correctly in BP/Editor
+		*WorldName,
+		CurrentTime);
+	// --- END LOGGING ---
+	
 	// Bind overlap events only on the server. The server will manage docking state.
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
@@ -106,4 +120,16 @@ bool UDockingPadComponent::IsPadFree_Server() const
 		return OccupyingShip_Server == nullptr;
 	}
 	return false; // Clients should not rely on this
+}
+
+ASolaraqShipBase* UDockingPadComponent::GetOccupyingShip_Server() const
+{
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		return OccupyingShip_Server;
+	}
+	// As with IsPadFree_Server, clients should not rely on this for authoritative state.
+	// Returning nullptr for clients.
+	UE_LOG(LogSolaraqSystem, Verbose, TEXT("DockingPadComponent %s: GetOccupyingShip_Server called by non-authority or no owner. Returning nullptr."), *GetName());
+	return nullptr;
 }
