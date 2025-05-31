@@ -3,7 +3,8 @@
 
 #include "EngineUtils.h"
 #include "Pawns/SolaraqShipBase.h"
-#include "Controllers/SolaraqPlayerController.h"
+//#include "Controllers/SolaraqPlayerController.h"
+#include "Controllers/SolaraqShipPlayerController.h"
 #include "Core/SolaraqGameInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerStart.h"
@@ -12,32 +13,24 @@
 
 ASolaraqSpaceLevelGameMode::ASolaraqSpaceLevelGameMode()
 {
-    // Crucial: Set up default PC and Pawn classes like AGameModeBase would
-    static const TCHAR* PlayerControllerBPPath = TEXT("/Game/Blueprints/Controllers/BP_SolaraqPlayerController.BP_SolaraqPlayerController_C");
-    static ConstructorHelpers::FClassFinder<APlayerController> PlayerControllerBPClass(PlayerControllerBPPath);
-    if (PlayerControllerBPClass.Succeeded())
-    {
-        PlayerControllerClass = PlayerControllerBPClass.Class;
-    }
-    else
-    {
-        PlayerControllerClass = ASolaraqPlayerController::StaticClass(); // Fallback
-        UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqSpaceLevelGameMode (Simplified): Could not find PlayerController BP. Using C++ ASolaraqPlayerController."));
-    }
+    bUseSeamlessTravel = true;
+    
+    // Set the C++ default for the PlayerControllerClass member inherited from AGameModeBase
+    PlayerControllerClass = ASolaraqShipPlayerController::StaticClass();
 
-    // Try to set a default pawn. If PlayerShipClassToSpawn (BP variable) is used later, it will override this.
-    // For now, let's ensure there's *some* valid ship pawn.
-    DefaultPawnClass = ASolaraqShipBase::StaticClass(); // Or your BP_PlayerShip if you can load it here
-    // static ConstructorHelpers::FClassFinder<APawn> DefaultShipBP(TEXT("/Game/Blueprints/Pawns/BP_PlayerShip.BP_PlayerShip_C"));
-    // if (DefaultShipBP.Succeeded())
-    // {
-    //    DefaultPawnClass = DefaultShipBP.Class;
-    // } else {
-    //    UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqSpaceLevelGameMode (Simplified): Could not find BP_PlayerShip. Defaulting to ASolaraqShipBase."));
-    // }
+    // Set the C++ default for the DefaultPawnClass member inherited from AGameModeBase
+    // If PlayerShipClassToSpawn is set in a Blueprint derived from this,
+    // GetDefaultPawnClassForController_Implementation will prioritize it.
+    // Otherwise, this DefaultPawnClass will be used.
+    DefaultPawnClass = ASolaraqShipBase::StaticClass(); // Fallback C++ default
 
+    // Note: If PlayerShipClassToSpawn is a UPROPERTY, its value from a Blueprint Game Mode
+    // will be available when GetDefaultPawnClassForController_Implementation is called.
+    // So, we don't need to check it directly in the constructor for DefaultPawnClass here.
+    // The GetDefaultPawnClassForController_Implementation override will handle the priority.
 
-    UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqSpaceLevelGameMode (Simplified) CONSTRUCTOR CALLED"));
+    UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqSpaceLevelGameMode C++ CONSTRUCTOR: PlayerControllerClass (base) set to %s, DefaultPawnClass (base) set to %s"),
+        *GetNameSafe(PlayerControllerClass), *GetNameSafe(DefaultPawnClass));
 }
 
 // Let Super handle these for now to mimic AGameModeBase behavior
@@ -48,17 +41,20 @@ AActor* ASolaraqSpaceLevelGameMode::FindPlayerStart_Implementation(AController* 
     return Super::FindPlayerStart_Implementation(Player, IncomingName); 
 }
 
+
+
 UClass* ASolaraqSpaceLevelGameMode::GetDefaultPawnClassForController_Implementation(AController* InController)
 {
-    UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqSpaceLevelGameMode (Simplified) GetDefaultPawnClassForController_Implementation - Calling Super"));
-    // Super will use DefaultPawnClass if set, or PlayerState->PawnClass, etc.
-    // Or if you have PlayerShipClassToSpawn UPROPERTY, you'd return that here if set.
-    // For now, let's rely on what the constructor set for DefaultPawnClass via Super.
-    if (PlayerShipClassToSpawn) { // Check if the UPROPERTY is set in a BP child
-         UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqSpaceLevelGameMode (Simplified) GetDefaultPawnClass - Using PlayerShipClassToSpawn: %s"), *PlayerShipClassToSpawn->GetName());
+    // Prioritize your custom UPROPERTY if it's set in the Blueprint Game Mode
+    if (PlayerShipClassToSpawn)
+    {
+        UE_LOG(LogSolaraqSystem, Log, TEXT("ASolaraqSpaceLevelGameMode GetDefaultPawnClass: Using PlayerShipClassToSpawn UPROPERTY: %s"), *PlayerShipClassToSpawn->GetName());
         return PlayerShipClassToSpawn;
     }
-    UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqSpaceLevelGameMode (Simplified) GetDefaultPawnClass - PlayerShipClassToSpawn not set, calling Super. (DefaultPawnClass is: %s)"), *GetNameSafe(DefaultPawnClass));
+    
+    // Otherwise, fall back to the DefaultPawnClass member of AGameModeBase (which we set a C++ default for).
+    // The Blueprint Game Mode can also directly override this AGameModeBase::DefaultPawnClass.
+    UE_LOG(LogSolaraqSystem, Log, TEXT("ASolaraqSpaceLevelGameMode GetDefaultPawnClass: PlayerShipClassToSpawn not set. Using AGameModeBase::DefaultPawnClass: %s"), *GetNameSafe(Super::GetDefaultPawnClassForController_Implementation(InController)));
     return Super::GetDefaultPawnClassForController_Implementation(InController);
 }
 

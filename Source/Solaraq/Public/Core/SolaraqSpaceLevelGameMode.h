@@ -15,15 +15,20 @@ class SOLARAQ_API ASolaraqSpaceLevelGameMode : public AGameModeBase
 public:
 	ASolaraqSpaceLevelGameMode();
 
-	virtual void RestartPlayer(AController* NewPlayer) override;
-	void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage);
-	bool PlayerCanRestart(APlayerController* Player);
-	virtual AActor* FindPlayerStart_Implementation(AController* Player, const FString& IncomingName) override;
-	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
-
+	// This UPROPERTY is specific to your game for easily selecting the ship pawn.
+	// It's fine to keep it if you prefer this direct slot.
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Player", meta = (DisplayName = "Player Ship Class To Spawn"))
+	TSubclassOf<ASolaraqShipBase> PlayerShipClassToSpawn;
 
 protected:
-	// Assign this in Blueprint if you have a specific player ship BP to spawn when returning
-	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Player")
-	TSubclassOf<ASolaraqShipBase> PlayerShipClassToSpawn; 
+	// We will use this to ensure PlayerShipClassToSpawn is prioritized if set.
+	virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
+
+public:
+	virtual void RestartPlayer(AController* NewPlayer) override;
+	// ... (other overrides like FindPlayerStart, InitGame, PlayerCanRestart remain)
+	virtual AActor* FindPlayerStart_Implementation(AController* Player, const FString& IncomingName) override;
+	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
+	virtual bool PlayerCanRestart(APlayerController* Player);
+
 };
