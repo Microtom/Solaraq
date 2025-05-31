@@ -59,4 +59,25 @@ public:
 
     // UPROPERTY(BlueprintReadOnly, Category = "Transition")
     // FTransform ShipRelativeTransformToPad;
+
+	/**
+	 * Prepares the GameInstance with data needed when transitioning FROM a Ship Level TO a Character Level.
+	 * Called by the server's PlayerController before initiating client travel.
+	 * @param InTargetCharacterLevel The name of the character level to load.
+	 * @param InShipTransformInOrigin The transform of the ship in the origin (space) level.
+	 * @param InOriginSpaceLevel The name of the origin (space) level.
+	 * @param InPlayerStartTagForCharLevel The tag for the APlayerStart in the character level (usually DockingPadUniqueID).
+	 * @param InDockingPadIDToReturnTo The UniqueID of the docking pad to return to in the space level.
+	 * @param InPlayerShipName The FName of the player's ship actor in the space level.
+	 * @param InShipDockedRelRotation The relative rotation of the ship to its docking pad.
+	 */
+	void PrepareForCharacterLevelLoad(
+		FName InTargetCharacterLevel,
+		const FTransform& InShipTransformInOrigin,
+		FName InOriginSpaceLevel,
+		FName InPlayerStartTagForCharLevel,
+		FName InDockingPadIDToReturnTo,
+		FName InPlayerShipName,
+		FRotator InShipDockedRelRotation
+	);
 };

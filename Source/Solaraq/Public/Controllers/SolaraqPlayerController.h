@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Controllers/SolaraqBasePlayerController.h"
 #include "GenericTeamAgentInterface.h" // Include if PlayerController handles Team ID
 #include "InputActionValue.h"         // Include for callback parameter type
 #include "SolaraqPlayerController.generated.h"

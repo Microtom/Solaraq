@@ -14,3 +14,4 @@ DEFINE_LOG_CATEGORY(LogSolaraqProjectile);
 DEFINE_LOG_CATEGORY(LogSolaraqMarker);
 DEFINE_LOG_CATEGORY(LogSolaraqTurret);
 DEFINE_LOG_CATEGORY(LogSolaraqTransition);
+DEFINE_LOG_CATEGORY(LogSolaraqShield);

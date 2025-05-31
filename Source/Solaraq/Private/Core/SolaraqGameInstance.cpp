@@ -54,3 +54,16 @@ void USolaraqGameInstance::ClearTransitionData()
 	ShipDockedRelativeRotation = FRotator::ZeroRotator;
 	// Consider more granular clearing if needed, e.g., ClearDataAfterCharacterLoad, ClearDataAfterShipReturn
 }
+
+void USolaraqGameInstance::PrepareForCharacterLevelLoad(FName InTargetCharacterLevel,
+	const FTransform& InShipTransformInOrigin, FName InOriginSpaceLevel, FName InPlayerStartTagForCharLevel,
+	FName InDockingPadIDToReturnTo, FName InPlayerShipName, FRotator InShipDockedRelRotation)
+{
+	TargetLevelToLoad = InTargetCharacterLevel;
+	ShipTransformInOriginLevel = InShipTransformInOrigin;
+	OriginLevelName = InOriginSpaceLevel;
+	PlayerStartTagForCharacterLevel = InPlayerStartTagForCharLevel;
+	DockingPadIdentifierToReturnTo = InDockingPadIDToReturnTo;
+	PlayerShipNameInOriginLevel = InPlayerShipName;
+	ShipDockedRelativeRotation = InShipDockedRelRotation;
+}

@@ -20,6 +20,9 @@
 #include "TimerManager.h" // For potential future timed sequences
 #include "Controllers/SolaraqPlayerController.h"
 #include "Core/SolaraqGameInstance.h"
+#include "Engine/DamageEvents.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/World.h" 
 
 // Simple Logging Helper Macro
 #define NET_LOG(LogCat, Verbosity, Format, ...) \
@@ -82,6 +85,15 @@ ASolaraqShipBase::ASolaraqShipBase()
     ShipMeshComponent->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
     ShipMeshComponent->SetNotifyRigidBodyCollision(false); // Visual mesh usually doesn't need this
 
+    // Shield Mesh Component
+    ShieldMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ShieldMesh"));
+    ShieldMeshComponent->SetupAttachment(ShipMeshComponent); // Attach to ship mesh or root
+    ShieldMeshComponent->SetVisibility(false); // Initially invisible
+    ShieldMeshComponent->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName); // No collision for visual effect
+    ShieldMeshComponent->SetSimulatePhysics(false);
+    ShieldMeshComponent->SetEnableGravity(false);
+    // TODO: Assign a default sphere mesh and a shield material in Blueprint or C++ post-init
+    
     MuzzlePoint = CreateDefaultSubobject<USceneComponent>(TEXT("MuzzlePoint"));
     if (MuzzlePoint && ShipMeshComponent)
     {
@@ -119,8 +131,16 @@ ASolaraqShipBase::ASolaraqShipBase()
     CurrentDockingStatus = EDockingStatus::None;
     ActiveDockingPad = nullptr;
 
-    NetUpdateFrequency = 160.0f; // Default is often 100, but depends on project. Try 30, 60.
+    NetUpdateFrequency = 100.0f; // Default is often 100, but depends on project. Try 30, 60.
     MinNetUpdateFrequency = 30.0f;
+
+    // Shield Defaults
+    CurrentShieldEnergy = MaxShieldEnergy;
+    bIsShieldActive = false;
+    LastShieldDeactivationTime = -1.0f;
+    ShieldTimerUpdateInterval = 0.1f;
+    MaxShieldStrength = 100.0f; // e.g., 100 HP
+    CurrentShieldStrength = 0.0f; 
     
     UE_LOG(LogSolaraqGeneral, Log, TEXT("ASolaraqShipBase %s Constructed"), *GetName());
 }
@@ -138,24 +158,84 @@ void ASolaraqShipBase::Client_ResetVisualScale_Implementation()
 float ASolaraqShipBase::TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent,
     class AController* EventInstigator, AActor* DamageCauser)
 {
-    const float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: TakeDamage CALLED. DamageAmount: %.1f, DamageCauser: %s, EventInstigator: %s"), 
+        *GetNameSafe(this), DamageAmount, *GetNameSafe(DamageCauser), *GetNameSafe(EventInstigator));
 
-    if (bIsDead || ActualDamage <= 0.0f)
+    if (bIsDead || DamageAmount <= 0.0f)
     {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: TakeDamage returning 0. IsDead: %d, DamageAmount: %.1f"), *GetNameSafe(this), bIsDead, DamageAmount);
         return 0.0f;
     }
 
+    float DamageAppliedToHealth = DamageAmount;
+
     if (HasAuthority())
     {
-        CurrentHealth = FMath::Clamp(CurrentHealth - ActualDamage, 0.0f, MaxHealth);
-        NET_LOG(LogSolaraqCombat, Log, TEXT("Took %.1f damage from %s. CurrentHealth: %.1f"), ActualDamage, *GetNameSafe(DamageCauser), CurrentHealth);
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: TakeDamage HAS AUTHORITY. bIsShieldActive: %d, CurrentShieldEnergy: %.1f"), 
+            *GetNameSafe(this), bIsShieldActive, CurrentShieldEnergy);
+
+        if (bIsShieldActive && CurrentShieldEnergy > 0.0f)
+        {
+            float ShieldStrengthBeforeDamage = CurrentShieldStrength;
+            float DamageAbsorbedByShield = FMath::Min(DamageAmount, CurrentShieldStrength);
+            CurrentShieldStrength -= DamageAbsorbedByShield;
+            DamageAppliedToHealth -= DamageAbsorbedByShield;
+
+            UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: Shield ACTIVE & HAS STRENGTH. StrengthBefore: %.1f. Absorbed: %.1f. StrengthAfter: %.1f. DamageToHealth: %.1f. DURATION Energy: %.1f (unaffected by this damage event)."),
+                *GetNameSafe(this), ShieldStrengthBeforeDamage, DamageAbsorbedByShield, CurrentShieldStrength, DamageAppliedToHealth, CurrentShieldEnergy);
+
+            FVector ImpactLocation = GetActorLocation(); // Default
+            if (DamageEvent.IsOfType(FPointDamageEvent::ClassID))
+            {
+                const FPointDamageEvent* PointDamageEvent = static_cast<const FPointDamageEvent*>(&DamageEvent);
+                ImpactLocation = PointDamageEvent->HitInfo.ImpactPoint;
+            }
+            else if (DamageEvent.IsOfType(FRadialDamageEvent::ClassID))
+            {
+                 const FRadialDamageEvent* RadialDamageEvent = static_cast<const FRadialDamageEvent*>(&DamageEvent);
+                 ImpactLocation = RadialDamageEvent->Origin;
+            }
+            UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: Calling Multicast_PlayShieldImpactEffects at %s for %.1f damage absorbed."),
+                *GetNameSafe(this), *ImpactLocation.ToString(), DamageAbsorbedByShield);
+            Multicast_PlayShieldImpactEffects(ImpactLocation, DamageAbsorbedByShield);
+
+
+            if (CurrentShieldStrength <= 0.0f)
+            {
+                CurrentShieldStrength = 0.0f;
+                UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: Shield STRENGTH depleted (<=0) by damage. Calling Server_DeactivateShield(true, false) (Forced=true, SkipCooldown=false)."), *GetNameSafe(this));
+                Server_DeactivateShield(true, false); // Shield broke from damage
+            }
+            
+            if (DamageAppliedToHealth <= 0.0f)
+            {
+                UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: Shield absorbed all damage. Returning 0 damage applied to health."), *GetNameSafe(this));
+                return 0.0f;
+            }
+        }
+
+        // Apply remaining damage (if any) to health
+        float HealthBeforeDamage = CurrentHealth;
+        CurrentHealth = FMath::Clamp(CurrentHealth - DamageAppliedToHealth, 0.0f, MaxHealth);
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: Applied %.1f damage to health. HealthBefore: %.1f, HealthAfter: %.1f"), 
+            *GetNameSafe(this), DamageAppliedToHealth, HealthBeforeDamage, CurrentHealth);
 
         if (CurrentHealth <= 0.0f)
         {
+            UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: Health depleted (<=0). Calling HandleDestruction()."), *GetNameSafe(this));
             HandleDestruction();
         }
     }
-    return ActualDamage;
+    else
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s: TakeDamage NO AUTHORITY. Returning original DamageAppliedToHealth: %.1f"), *GetNameSafe(this), DamageAppliedToHealth);
+    }
+    return DamageAppliedToHealth;
+}
+
+FRotator ASolaraqShipBase::GetActualDockingTargetRelativeRotation() const
+{
+    return ActualDockingTargetRelativeRotation;
 }
 
 float ASolaraqShipBase::GetHealthPercentage() const
@@ -187,6 +267,7 @@ void ASolaraqShipBase::BeginPlay()
     if (HasAuthority())
     {
         CurrentHealth = MaxHealth;
+        CurrentShieldEnergy = MaxShieldEnergy;
         bIsDead = false;
 
         FTimerHandle DummyTimerHandle; 
@@ -279,6 +360,47 @@ void ASolaraqShipBase::PerformFireHomingMissile(AActor* HomingTarget)
     }
 }
 
+
+void ASolaraqShipBase::Server_RequestToggleShield_Implementation()
+{
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_RequestToggleShield_Implementation CALLED."), *GetNameSafe(this));
+    if (!HasAuthority() || IsDead() || IsShipDockedOrDocking())
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Cannot toggle shield. HasAuthority: %d, IsDead: %d, IsDockedOrDocking: %d."),
+            *GetNameSafe(this), HasAuthority(), IsDead(), IsShipDockedOrDocking());
+        return;
+    }
+
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): CurrentTime: %.2f. bIsShieldActive: %d."), *GetNameSafe(this), CurrentTime, bIsShieldActive);
+
+    if (bIsShieldActive)
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield is ACTIVE. Calling Server_DeactivateShield(false)."), *GetNameSafe(this));
+        Server_DeactivateShield(false); 
+    }
+    else
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield is INACTIVE. LastShieldDeactivationTime: %.2f, ShieldActivationCooldown: %.2f."), 
+            *GetNameSafe(this), LastShieldDeactivationTime, ShieldActivationCooldown);
+        if (LastShieldDeactivationTime > 0.f && CurrentTime < LastShieldDeactivationTime + ShieldActivationCooldown)
+        {
+            UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Cannot activate shield: Still in activation cooldown. Time remaining: %.1fs"),
+                *GetNameSafe(this), (LastShieldDeactivationTime + ShieldActivationCooldown) - CurrentTime);
+            return;
+        }
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): CurrentShieldEnergy: %.1f, MinEnergyToActivateShield: %.1f."),
+            *GetNameSafe(this), CurrentShieldEnergy, MinEnergyToActivateShield);
+        if (CurrentShieldEnergy < MinEnergyToActivateShield) // Check DURATION energy
+        {
+            UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Cannot activate shield: Not enough DURATION energy (%.1f / %.1f required)."),
+                *GetNameSafe(this), CurrentShieldEnergy, MinEnergyToActivateShield);
+            return;
+        }
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield is INACTIVE and conditions met. Calling Server_ActivateShield()."), *GetNameSafe(this));
+        Server_ActivateShield();
+    }
+}
 
 void ASolaraqShipBase::Server_AttemptReestablishDockingAfterLoad()
 {
@@ -689,6 +811,44 @@ void ASolaraqShipBase::Tick(float DeltaTime)
             ClientIsDead,
             *GetActorLocation().ToString());*/
     }
+    
+    // Useful for debugging in PIE.
+    if ( (IsLocallyControlled() && GetNetMode() != NM_DedicatedServer) || (HasAuthority() && GetNetMode() != NM_Client) )
+    {
+        FString ShieldDebugText = FString::Printf(TEXT("--- SHIELD STATUS [%s] ---"), *GetNameSafe(this));
+        ShieldDebugText += FString::Printf(TEXT("\nIsActive: %s"), bIsShieldActive ? TEXT("TRUE") : TEXT("FALSE"));
+        ShieldDebugText += FString::Printf(TEXT("\nEnergy: %.1f / %.1f"), CurrentShieldEnergy, MaxShieldEnergy);
+        ShieldDebugText += FString::Printf(TEXT("\nHP (Strength): %.1f / %.1f"), CurrentShieldStrength, MaxShieldStrength);
+        
+        float WorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() : -1.f;
+        ShieldDebugText += FString::Printf(TEXT("\nLastDeactTime: %.2f (World: %.2f)"), LastShieldDeactivationTime, WorldTime);
+        
+        if (GetWorld()) // Ensure GetWorld() is valid before accessing TimerManager
+        {
+            const FTimerManager& TM = GetWorldTimerManager();
+            bool bDrainTimerActive = TM.IsTimerActive(TimerHandle_ShieldDrain);
+            bool bRegenDelayTimerActive = TM.IsTimerActive(TimerHandle_ShieldRegenDelayCheck);
+            bool bRegenTimerActive = TM.IsTimerActive(TimerHandle_ShieldRegen);
+
+            ShieldDebugText += FString::Printf(TEXT("\nDrain Timer: %s"), bDrainTimerActive ? TEXT("Active") : TEXT("Inactive"));
+            if(bDrainTimerActive) ShieldDebugText += FString::Printf(TEXT(" (Rem: %.2fs)"), TM.GetTimerRemaining(TimerHandle_ShieldDrain));
+
+            ShieldDebugText += FString::Printf(TEXT("\nRegenDelay Timer: %s"), bRegenDelayTimerActive ? TEXT("Active") : TEXT("Inactive"));
+            if(bRegenDelayTimerActive) ShieldDebugText += FString::Printf(TEXT(" (Rem: %.2fs)"), TM.GetTimerRemaining(TimerHandle_ShieldRegenDelayCheck));
+            
+            ShieldDebugText += FString::Printf(TEXT("\nRegen Timer: %s"), bRegenTimerActive ? TEXT("Active") : TEXT("Inactive"));
+            if(bRegenTimerActive) ShieldDebugText += FString::Printf(TEXT(" (Rem: %.2fs)"), TM.GetTimerRemaining(TimerHandle_ShieldRegen));
+        }
+        else
+        {
+            ShieldDebugText += TEXT("\nTimerManager: GetWorld() is NULL!");
+        }
+
+        // Display slightly above the ship's root component
+        FVector TextLocation = GetActorLocation() + FVector(0, 0, 200.0f); // Adjust Z offset if needed
+        DrawDebugString(GetWorld(), TextLocation, ShieldDebugText, nullptr, FColor::White, 0.0f, true, 1.0f); // true for shadow, 1.0f for scale
+    }
+    // --- End Shield Debug On-Screen Text ---
 }
 
 void ASolaraqShipBase::ClampVelocity()
@@ -818,68 +978,56 @@ ETeamAttitude::Type ASolaraqShipBase::GetTeamAttitudeTowards(const AActor& Other
 
 void ASolaraqShipBase::RequestInteraction()
 {
-    // This function is called on the ship instance (could be client or server side initially
-    // depending on where PlayerController::HandleInteractInput is called from).
-    // For level transition, the authority (server for networked game, local for standalone) should handle it.
-    
-    UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: RequestInteraction() called. CurrentDockingStatus: %s, ActiveDockingPad: %s"),
-            *GetName(), *UEnum::GetValueAsString(CurrentDockingStatus), *GetNameSafe(ActiveDockingPad));
-    
-    if (IsShipDocked() && ActiveDockingPad) // Check if docked and to which pad
+    if (IsShipDocked() && ActiveDockingPad)
     {
-        AController* CurrentShipController = GetController();
-        
-        if (!CurrentShipController)
+        FName TargetLevelName = TEXT("CharacterTestLevel"); // Default character level name
+        if (!CharacterLevelOverrideName.IsNone())
         {
-            UE_LOG(LogSolaraqTransition, Error, TEXT("Ship %s: GetController() returned NULL! Cannot transition."), *GetName());
-            return;
+            TargetLevelName = CharacterLevelOverrideName;
         }
 
-        // UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: GetController() returned: %s (Class: %s). Attempting to cast to ASolaraqPlayerController."),
-        //     *GetName(), *GetNameSafe(CurrentShipController), *GetNameSafe(CurrentShipController->GetClass()));
+        FName PadID = ActiveDockingPad->GetFName();
+        if (ActiveDockingPad->DockingPadUniqueID != NAME_None)
+        {
+            PadID = ActiveDockingPad->DockingPadUniqueID;
+        }
         
-        ASolaraqPlayerController* PC = Cast<ASolaraqPlayerController>(CurrentShipController);
-        if (PC)
-        {
-            UE_LOG(LogSolaraqTransition, Log, TEXT("Ship %s: Successfully cast controller to ASolaraqPlayerController (%s). Interaction requested while docked to %s. Telling PC to transition."),
-                *GetName(), *GetNameSafe(PC), *ActiveDockingPad->GetName());
-
-            FName TargetLevelName = TEXT("CharacterTestLevel"); // Default character level name
-            if (!CharacterLevelOverrideName.IsNone())
-            {
-                TargetLevelName = CharacterLevelOverrideName; // Use override if set
-                UE_LOG(LogSolaraqTransition, Log, TEXT("Ship %s: Using CharacterLevelOverrideName: %s"), *GetName(), *TargetLevelName.ToString());
-            }
-            else
-            {
-                UE_LOG(LogSolaraqTransition, Log, TEXT("Ship %s: Using default TargetCharacterLevelName: %s"), *GetName(), *TargetLevelName.ToString());
-            }
-            
-            FName PadID = ActiveDockingPad->GetFName(); 
-            if (ActiveDockingPad->DockingPadUniqueID != NAME_None) 
-            {
-                PadID = ActiveDockingPad->DockingPadUniqueID;
-                // UE_LOG(LogSolaraqTransition, Log, TEXT("Ship %s: Using DockingPadUniqueID for PadID: %s"), *GetName(), *PadID.ToString());
-            }
-            // else
-            // {
-            //     UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: DockingPadUniqueID is None for pad %s. Using pad's FName %s as PadID. Ensure PlayerStartTag matches this."), *GetName(), *ActiveDockingPad->GetName(), *PadID.ToString());
-            // }
-            
-            PC->InitiateLevelTransitionToCharacter(TargetLevelName, PadID);
-        }
-        else
-        {
-            UE_LOG(LogSolaraqTransition, Error, TEXT("Ship %s: Cast<ASolaraqPlayerController>(GetController()) FAILED. Controller was %s (Class: %s). Cannot transition."),
-                *GetName(), *GetNameSafe(CurrentShipController), *GetNameSafe(CurrentShipController->GetClass()));
-        }
+        // Call the server RPC to request the transition
+        Server_RequestTransitionToCharacterLevel(TargetLevelName, PadID);
     }
     else
     {
-        UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Interaction requested, but IsShipDocked() is %s or ActiveDockingPad is %s. Cannot transition."),
-            *GetName(),
-            IsShipDocked() ? TEXT("true") : TEXT("false"),
-            ActiveDockingPad ? *ActiveDockingPad->GetName() : TEXT("NULL"));
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("Ship %s: Interaction requested, but not properly docked."), *GetName());
+    }
+}
+
+void ASolaraqShipBase::Server_RequestTransitionToCharacterLevel_Implementation(FName TargetLevel, FName DockingPadID)
+{
+    if (!HasAuthority()) // Should always be true here, but good practice
+    {
+        return;
+    }
+
+    AController* MyController = GetController();
+    if (!MyController)
+    {
+        UE_LOG(LogSolaraqTransition, Error, TEXT("Ship %s: Server_RequestTransitionToCharacterLevel - GetController() returned NULL!"), *GetName());
+        return;
+    }
+
+    // Assuming your PlayerControllers derive from a common base that handles the travel initiation
+    ASolaraqBasePlayerController* PC = Cast<ASolaraqBasePlayerController>(MyController);
+    if (PC)
+    {
+        UE_LOG(LogSolaraqTransition, Log, TEXT("Ship %s: Telling its PlayerController %s to initiate character transition to Level: %s, PadID: %s"), 
+            *GetName(), *PC->GetName(), *TargetLevel.ToString(), *DockingPadID.ToString());
+
+        // The PlayerController will handle GameInstance prep and then call ClientTravel on itself (server-side instance).
+        PC->Server_InitiateSeamlessTravelToLevel(TargetLevel, true, DockingPadID, this);
+    }
+    else
+    {
+        UE_LOG(LogSolaraqTransition, Error, TEXT("Ship %s: Server_RequestTransitionToCharacterLevel - Failed to cast Controller %s to ASolaraqBasePlayerController."), *GetName(), *MyController->GetName());
     }
 }
 
@@ -904,6 +1052,43 @@ void ASolaraqShipBase::OnRep_StandardAmmo()
 {
     UE_LOG(LogSolaraqSystem, VeryVerbose, TEXT("CLIENT %s OnRep_StandardAmmo: %d"), *GetName(), CurrentStandardAmmo);
     OnInventoryUpdated();
+}
+
+void ASolaraqShipBase::OnRep_CurrentShieldEnergy()
+{
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (CLIENT): OnRep_CurrentShieldEnergy CALLED. New Value: %.1f. Calling UpdateShieldVisuals."),
+        *GetNameSafe(this), CurrentShieldEnergy);
+    UpdateShieldVisuals(); 
+}
+
+void ASolaraqShipBase::OnRep_IsShieldActive()
+{
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (CLIENT): OnRep_IsShieldActive CALLED. New Value: %d. Calling UpdateShieldVisuals."),
+       *GetNameSafe(this), bIsShieldActive);
+    UpdateShieldVisuals();
+}
+
+void ASolaraqShipBase::OnRep_CurrentShieldStrength()
+{
+    
+}
+
+void ASolaraqShipBase::Multicast_PlayShieldActivationEffects_Implementation()
+{
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (%s): Multicast_PlayShieldActivationEffects_Implementation CALLED. Calling UpdateShieldVisuals."),
+       *GetNameSafe(this), (GetNetMode() == NM_Client ? TEXT("CLIENT") : TEXT("SERVER/OTHER")));
+    UpdateShieldVisuals(); 
+}
+
+void ASolaraqShipBase::Multicast_PlayShieldDeactivationEffects_Implementation(bool bWasBrokenOrEmptied)
+{
+    NET_LOG(LogSolaraqCombat, Verbose, TEXT("Multicast_PlayShieldDeactivationEffects executed. WasBroken: %d"), bWasBrokenOrEmptied);
+    UpdateShieldVisuals(); 
+}
+
+void ASolaraqShipBase::Multicast_PlayShieldImpactEffects_Implementation(FVector ImpactLocation, float DamageAbsorbed)
+{
+    NET_LOG(LogSolaraqCombat, Verbose, TEXT("Multicast_PlayShieldImpactEffects executed at %s for %.1f damage."), *ImpactLocation.ToString(), DamageAbsorbed);
 }
 
 void ASolaraqShipBase::SetTurnInputForRoll(float TurnValue)
@@ -993,6 +1178,12 @@ void ASolaraqShipBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
     // --- Docking Replication ---
     DOREPLIFETIME(ASolaraqShipBase, CurrentDockingStatus);
     DOREPLIFETIME(ASolaraqShipBase, ActiveDockingPad);
+    // --- Shield Replication ---
+    DOREPLIFETIME_CONDITION(ASolaraqShipBase, MaxShieldEnergy, COND_InitialOnly);
+    DOREPLIFETIME(ASolaraqShipBase, CurrentShieldEnergy);
+    DOREPLIFETIME(ASolaraqShipBase, bIsShieldActive);
+    DOREPLIFETIME_CONDITION(ASolaraqShipBase, MaxShieldStrength, COND_InitialOnly);
+    DOREPLIFETIME(ASolaraqShipBase, CurrentShieldStrength);
 }
 
 void ASolaraqShipBase::OnRep_CurrentEnergy()
@@ -1236,26 +1427,6 @@ void ASolaraqShipBase::Server_RequestUndock_Implementation()
     }
 }
 
-void ASolaraqShipBase::PerformDockingAttachmentToPad(UDockingPadComponent* Pad)
-{
-    /*if (!HasAuthority() || !Pad || !CollisionAndPhysicsRoot) return;
-    AActor* PadOwner = Pad->GetOwner();
-    if (!PadOwner) return;
-
-    NET_LOG(LogSolaraqSystem, Log, TEXT("Performing docking attachment to %s on %s."), *Pad->GetName(), *PadOwner->GetName());
-
-    CollisionAndPhysicsRoot->SetSimulatePhysics(false);
-    CollisionAndPhysicsRoot->SetPhysicsLinearVelocity(FVector::ZeroVector);
-    CollisionAndPhysicsRoot->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-
-    FAttachmentTransformRules AttachRules(EAttachmentRule::KeepWorld, EAttachmentRule::KeepWorld, EAttachmentRule::KeepWorld, false);
-    GetRootComponent()->AttachToComponent(Pad->GetAttachPoint(), AttachRules);
-    GetRootComponent()->SetRelativeLocationAndRotation(FVector::ZeroVector, FRotator::ZeroRotator);
-    NET_LOG(LogSolaraqSystem, Verbose, TEXT("Snapped to relative 0,0,0 of pad %s."), *Pad->GetName());
-
-    Internal_DisableSystemsForDocking();*/
-}
-
 void ASolaraqShipBase::PerformUndockingDetachmentFromPad()
 {
     // --- SERVER ONLY ---
@@ -1310,6 +1481,207 @@ void ASolaraqShipBase::Internal_EnableSystemsAfterUndocking()
 {
     NET_LOG(LogSolaraqSystem, Verbose, TEXT("Enabling systems after undocking."));
     // Re-enable systems
+}
+
+void ASolaraqShipBase::Server_ActivateShield()
+{
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_ActivateShield CALLED."), *GetNameSafe(this));
+    if (!HasAuthority() || bIsShieldActive)
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_ActivateShield returning. HasAuthority: %d, bIsShieldActive: %d."),
+            *GetNameSafe(this), HasAuthority(), bIsShieldActive);
+        return;
+    }
+
+    // Check if there's enough DURATION energy
+    if (CurrentShieldEnergy < MinEnergyToActivateShield)
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Cannot activate shield: Not enough DURATION energy (%.1f / %.1f required). CurrentStrength: %.1f"),
+            *GetNameSafe(this), CurrentShieldEnergy, MinEnergyToActivateShield, CurrentShieldStrength);
+        return;
+    }
+
+    bIsShieldActive = true;
+    CurrentShieldStrength = MaxShieldStrength; // Set shield HP to full
+    LastShieldDeactivationTime = -1.0f;
+
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield HP (Strength) set to full: %.1f. DURATION Energy: %.1f"),
+        *GetNameSafe(this), CurrentShieldStrength, CurrentShieldEnergy);
+
+    ClearAllShieldTimers();
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Setting TimerHandle_ShieldDrain for DURATION. Interval: %.2f"), *GetNameSafe(this), ShieldTimerUpdateInterval);
+    GetWorldTimerManager().SetTimer(TimerHandle_ShieldDrain, this, &ASolaraqShipBase::Server_ProcessShieldDrain, ShieldTimerUpdateInterval, true);
+
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield ACTIVATED. DURATION: %.1f. STRENGTH: %.1f. Calling Multicast & OnRep."),
+        *GetNameSafe(this), CurrentShieldEnergy, CurrentShieldStrength);
+    Multicast_PlayShieldActivationEffects();
+    OnRep_IsShieldActive();
+}
+
+void ASolaraqShipBase::Server_DeactivateShield(bool bForcedByEmptyOrBreak, bool bSkipCooldown)
+{
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_DeactivateShield CALLED. bForcedByEmptyOrBreak: %d, bSkipCooldown: %d"), // Corrected parameter name in log
+        *GetNameSafe(this), bForcedByEmptyOrBreak, bSkipCooldown);
+    if (!HasAuthority() || !bIsShieldActive)
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_DeactivateShield returning. HasAuthority: %d, bIsShieldActive: %d."),
+            *GetNameSafe(this), HasAuthority(), bIsShieldActive);
+        return;
+    }
+
+    bIsShieldActive = false;
+    float PreviousStrength = CurrentShieldStrength;
+    CurrentShieldStrength = 0.0f; // Shield HP is 0 when inactive
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield HP (Strength) set to 0. Was: %.1f. Current DURATION Energy: %.1f"),
+        *GetNameSafe(this), PreviousStrength, CurrentShieldEnergy);
+
+
+    if (!bSkipCooldown) {
+        LastShieldDeactivationTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): LastShieldDeactivationTime set to: %.2f (Cooldown NOT skipped)."), *GetNameSafe(this), LastShieldDeactivationTime);
+    } else {
+        LastShieldDeactivationTime = -1.0f;
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): LastShieldDeactivationTime set to -1.0 (Cooldown SKIPPED)."), *GetNameSafe(this));
+    }
+
+    ClearAllShieldTimers(); // Stop duration drain
+    if (!bSkipCooldown) // Start DURATION energy regen process
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Setting TimerHandle_ShieldRegenDelayCheck for DURATION energy. Delay: %.2f."), *GetNameSafe(this), ShieldRegenDelay);
+        GetWorldTimerManager().SetTimer(TimerHandle_ShieldRegenDelayCheck, this, &ASolaraqShipBase::Server_TryStartShieldRegenTimer, ShieldRegenDelay, false);
+    }
+    else
+    {
+         UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): SKIPPING ShieldRegenDelayCheck timer start (Cooldown SKIPPED)."), *GetNameSafe(this));
+    }
+
+    FString Reason = bForcedByEmptyOrBreak ? TEXT("forced (depleted duration/strength)") : TEXT("player toggle"); // Using bForcedByEmptyOrBreak
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield DEACTIVATED (%s). DURATION: %.1f. STRENGTH now 0. Calling Multicast & OnRep."),
+        *GetNameSafe(this), *Reason, CurrentShieldEnergy);
+    Multicast_PlayShieldDeactivationEffects(bForcedByEmptyOrBreak); // Pass the correct parameter
+    OnRep_IsShieldActive();
+}
+
+void ASolaraqShipBase::UpdateShieldVisuals()
+{
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (%s): UpdateShieldVisuals CALLED. bIsShieldActive: %d. ShieldMeshComponent valid: %d"),
+        *GetNameSafe(this), (GetNetMode() == NM_Client ? TEXT("CLIENT") : TEXT("SERVER/OTHER")), bIsShieldActive, ShieldMeshComponent != nullptr);
+    if (ShieldMeshComponent)
+    {
+        ShieldMeshComponent->SetVisibility(bIsShieldActive);
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (%s): ShieldMesh visibility set to: %s"),
+            *GetNameSafe(this), (GetNetMode() == NM_Client ? TEXT("CLIENT") : TEXT("SERVER/OTHER")), bIsShieldActive ? TEXT("Visible") : TEXT("Hidden"));
+    }
+}
+
+void ASolaraqShipBase::Server_ProcessShieldDrain()
+{
+    // This can be very spammy, consider reducing verbosity or frequency if not actively debugging drain
+    // UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_ProcessShieldDrain CALLED."), *GetNameSafe(this));
+    if (!HasAuthority() || !bIsShieldActive || IsDead())
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_ProcessShieldDrain stopping/returning. HasAuth: %d, IsActive: %d, IsDead: %d. Clearing timers."),
+            *GetNameSafe(this), HasAuthority(), bIsShieldActive, IsDead());
+        ClearAllShieldTimers();
+        return;
+    }
+
+    float EnergyBeforeDrain = CurrentShieldEnergy;
+    CurrentShieldEnergy -= ShieldEnergyDrainRate * ShieldTimerUpdateInterval;
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield DURATION Draining. Before: %.2f, After: %.2f. Current STRENGTH: %.1f (unaffected by DURATION drain)."), // Ensure uncommented
+        *GetNameSafe(this), EnergyBeforeDrain, CurrentShieldEnergy, CurrentShieldStrength);
+
+    if (CurrentShieldEnergy <= 0.0f)
+    {
+        CurrentShieldEnergy = 0.0f;
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield DURATION energy depleted. Calling Server_DeactivateShield(true, false) (Forced=true, SkipCooldown=false)."), *GetNameSafe(this));
+        Server_DeactivateShield(true, false); // Duration ran out
+    }
+}
+
+void ASolaraqShipBase::Server_TryStartShieldRegenTimer()
+{
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_TryStartShieldRegenTimer CALLED."), *GetNameSafe(this));
+    if (!HasAuthority() || bIsShieldActive || IsDead())
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_TryStartShieldRegenTimer stopping/returning. HasAuth: %d, IsActive: %d, IsDead: %d. Clearing RegenDelayCheck timer."),
+            *GetNameSafe(this), HasAuthority(), bIsShieldActive, IsDead());
+        GetWorldTimerManager().ClearTimer(TimerHandle_ShieldRegenDelayCheck); // Clear this delay timer if conditions aren't met
+        return;
+    }
+    
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Clearing TimerHandle_ShieldRegenDelayCheck."), *GetNameSafe(this));
+    GetWorldTimerManager().ClearTimer(TimerHandle_ShieldRegenDelayCheck);
+
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): CurrentTime: %.2f. LastShieldDeactivationTime: %.2f, ShieldActivationCooldown: %.2f."),
+        *GetNameSafe(this), CurrentTime, LastShieldDeactivationTime, ShieldActivationCooldown);
+        
+    if (LastShieldDeactivationTime > 0.f && CurrentTime < LastShieldDeactivationTime + ShieldActivationCooldown)
+    {
+        float RemainingCooldown = (LastShieldDeactivationTime + ShieldActivationCooldown) - CurrentTime;
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield regen delay passed, but still in activation cooldown. Rescheduling regen start in %.2fs."),
+            *GetNameSafe(this), RemainingCooldown);
+        GetWorldTimerManager().SetTimer(TimerHandle_ShieldRegenDelayCheck, this, &ASolaraqShipBase::Server_TryStartShieldRegenTimer, RemainingCooldown, false);
+        return;
+    }
+
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): CurrentShieldEnergy: %.1f, MaxShieldEnergy: %.1f."),
+        *GetNameSafe(this), CurrentShieldEnergy, MaxShieldEnergy);
+    if (CurrentShieldEnergy < MaxShieldEnergy)
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Starting TimerHandle_ShieldRegen. Interval: %.2f"), *GetNameSafe(this), ShieldTimerUpdateInterval);
+        GetWorldTimerManager().SetTimer(TimerHandle_ShieldRegen, this, &ASolaraqShipBase::Server_ProcessShieldRegen, ShieldTimerUpdateInterval, true);
+    }
+    else
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield already at max energy (%.1f). Not starting regen timer."), *GetNameSafe(this), CurrentShieldEnergy);
+    }
+}
+
+void ASolaraqShipBase::Server_ProcessShieldRegen()
+{
+    // This can be very spammy, consider reducing verbosity or frequency if not actively debugging regen
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_ProcessShieldRegen CALLED."), *GetNameSafe(this));
+    if (!HasAuthority() || bIsShieldActive || IsDead())
+    {
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Server_ProcessShieldRegen stopping/returning. HasAuth: %d, IsActive: %d, IsDead: %d. Clearing timers."),
+            *GetNameSafe(this), HasAuthority(), bIsShieldActive, IsDead());
+        ClearAllShieldTimers();
+        return;
+    }
+
+    float EnergyBeforeRegen = CurrentShieldEnergy;
+    CurrentShieldEnergy = FMath::Min(CurrentShieldEnergy + ShieldEnergyRegenRate * ShieldTimerUpdateInterval, MaxShieldEnergy);
+    // UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield Regenerating. Before: %.2f, After: %.2f (RegenRate: %.2f, Interval: %.2f)"),
+    //     *GetNameSafe(this), EnergyBeforeRegen, CurrentShieldEnergy, ShieldEnergyRegenRate, ShieldTimerUpdateInterval);
+
+    if (CurrentShieldEnergy >= MaxShieldEnergy)
+    {
+        CurrentShieldEnergy = MaxShieldEnergy;
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (SERVER): Shield fully regenerated to %.1f. Clearing TimerHandle_ShieldRegen."), *GetNameSafe(this), CurrentShieldEnergy);
+        GetWorldTimerManager().ClearTimer(TimerHandle_ShieldRegen);
+    }
+}
+
+void ASolaraqShipBase::ClearAllShieldTimers()
+{
+    UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (%s): ClearAllShieldTimers CALLED."), *GetNameSafe(this), (HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT/OTHER")));
+    if (GetWorldTimerManager().IsTimerActive(TimerHandle_ShieldDrain))
+    {
+        GetWorldTimerManager().ClearTimer(TimerHandle_ShieldDrain);
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (%s): Cleared TimerHandle_ShieldDrain."), *GetNameSafe(this), (HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT/OTHER")));
+    }
+    if (GetWorldTimerManager().IsTimerActive(TimerHandle_ShieldRegenDelayCheck))
+    {
+        GetWorldTimerManager().ClearTimer(TimerHandle_ShieldRegenDelayCheck);
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (%s): Cleared TimerHandle_ShieldRegenDelayCheck."), *GetNameSafe(this), (HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT/OTHER")));
+    }
+    if (GetWorldTimerManager().IsTimerActive(TimerHandle_ShieldRegen))
+    {
+        GetWorldTimerManager().ClearTimer(TimerHandle_ShieldRegen);
+        UE_LOG(LogSolaraqShield, Warning, TEXT("Ship %s (%s): Cleared TimerHandle_ShieldRegen."), *GetNameSafe(this), (HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT/OTHER")));
+    }
 }
 
 bool ASolaraqShipBase::IsDockedToPadID(FName PadUniqueID) const
