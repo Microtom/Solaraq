@@ -12,7 +12,6 @@ class UInputMappingContext;
 class UInputAction;
 class ASolaraqShipBase;
 class UUserWidget; // For target markers
-class UWidgetComponent; // If used
 
 UCLASS()
 class SOLARAQ_API ASolaraqShipPlayerController : public ASolaraqBasePlayerController
@@ -71,6 +70,12 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Ship")
     TObjectPtr<UInputAction> ToggleShieldAction;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Ship|Mining") 
+    TObjectPtr<UInputAction> FireMiningLaserAction;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Ship|Mining")
+    TObjectPtr<UInputAction> AimLaserAction;
     
     // InteractAction is in Base, will be bound here.
 
@@ -86,6 +91,10 @@ protected:
     void HandleSwitchTarget(const FInputActionValue& Value);
     void HandleShipInteractInput(); // Specific handler for ship interaction
     void HandleToggleShieldInput(); // Handler for shield toggle
+    void HandleFireMiningLaserStarted(const FInputActionValue& Value); 
+    void HandleFireMiningLaserCompleted(const FInputActionValue& Value);
+    void HandleAimLaserTriggered(const FInputActionValue& Value);
+    void HandleAimLaserCompleted(const FInputActionValue& Value);
     
 private:
     // --- Homing Lock System ---
@@ -113,14 +122,32 @@ private:
     FTimerHandle TimerHandle_ScanTargets;
 
     // --- HUD / Widgets ---
-    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Homing Lock|UI")
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI|Homing Lock")
     TSubclassOf<UUserWidget> TargetMarkerWidgetClass;
 
     UPROPERTY()
     TMap<TWeakObjectPtr<AActor>, TObjectPtr<UUserWidget>> TargetMarkerWidgets;
 
-    // No longer need specific PossessedShipPawn, GetControlledShip() will cast GetPawn()
+    /** Widget class to use for the mining laser aiming indicator. Should implement IMiningAimWidgetInterface. */
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI|Mining")
+    TSubclassOf<UUserWidget> MiningAimIndicatorWidgetClass;
+    
+    /** Runtime instance of the mining laser aiming indicator widget. */
+    UPROPERTY(Transient) // Transient as it's managed at runtime
+    TObjectPtr<UUserWidget> ActiveMiningAimIndicatorWidget;
 
+    // --- Mining Laser Aiming State ---
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|MiningLaserAim")
+    float LaserRelativeAimRateDegreesPerSecond = 60.0f; // How fast the desired aim angle changes with mouse input
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|MiningLaserAim")
+    float MaxLaserRelativeYawDegrees = 120.0f; // Max angle from ship's forward for the desired aim
+    
+    // Transient state for aiming
+    float CurrentLaserRelativeAimYaw = 0.0f;
+    FVector2D LastAimLaserInputValue = FVector2D::ZeroVector; // Stores current mouse input for aiming
+
+    
     void UpdatePotentialTargets();
     void UpdateTargetWidgets();
     void ClearTargetWidgets();
@@ -128,3 +155,4 @@ private:
 
     void ApplyShipInputMappingContext();
 };
+

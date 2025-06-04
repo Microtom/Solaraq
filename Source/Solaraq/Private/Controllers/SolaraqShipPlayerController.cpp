@@ -6,10 +6,13 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputAction.h"
+#include "UI/MiningAimWidgetInterface.h"
 #include "Blueprint/UserWidget.h" // For target markers
 #include "UI/TargetWidgetInterface.h" // For target markers
 #include "Kismet/GameplayStatics.h" // For ProjectWorldToScreen
 #include "EngineUtils.h" // For TActorIterator
+#include "Components/MiningLaserComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Logging/SolaraqLogChannels.h"
 
 ASolaraqShipPlayerController::ASolaraqShipPlayerController()
@@ -20,6 +23,7 @@ ASolaraqShipPlayerController::ASolaraqShipPlayerController()
     HomingTargetScanRange = 25000.0f;
     HomingTargetScanConeAngleDegrees = 90.0f;
     HomingTargetScanInterval = 0.5f;
+    ActiveMiningAimIndicatorWidget = nullptr;
 }
 
 void ASolaraqShipPlayerController::RequestTransitionToCharacterLevel(FName TargetLevelName, FName DockingPadID,
@@ -156,6 +160,13 @@ void ASolaraqShipPlayerController::OnUnPossess()
         ClearTargetWidgets();
     }
 
+    // Clean up mining aim widget
+       if (ActiveMiningAimIndicatorWidget)
+           {
+                   ActiveMiningAimIndicatorWidget->RemoveFromParent();
+                  ActiveMiningAimIndicatorWidget = nullptr;
+               }
+    
     Super::OnUnPossess(); // Calls ASolaraqBasePlayerController::OnUnPossess
 }
 
@@ -205,6 +216,42 @@ void ASolaraqShipPlayerController::SetupInputComponent()
     } else {
         UE_LOG(LogSolaraqShield, Warning, TEXT("ShipPC %s: SetupInputComponent - ToggleShieldAction IS NULL! Cannot bind shield toggle."), *GetNameSafe(this));
     }
+    if (FireMiningLaserAction)
+    {
+        EnhancedInputComponentRef->BindAction(FireMiningLaserAction, ETriggerEvent::Started, this, &ASolaraqShipPlayerController::HandleFireMiningLaserStarted);
+        EnhancedInputComponentRef->BindAction(FireMiningLaserAction, ETriggerEvent::Completed, this, &ASolaraqShipPlayerController::HandleFireMiningLaserCompleted);
+        // Optional: If you need continuous updates while held, bind ETriggerEvent::Triggered to HandleFireMiningLaser
+        // EnhancedInputComponentRef->BindAction(FireMiningLaserAction, ETriggerEvent::Triggered, this, &ASolaraqShipPlayerController::HandleFireMiningLaser);
+        UE_LOG(LogSolaraqSystem, Log, TEXT("ASolaraqShipPlayerController: Bound FireMiningLaserAction."));
+    }
+    else
+    {
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqShipPlayerController: FireMiningLaserAction is NOT assigned! Mining laser input will not work."));
+    }
+    if (FireMiningLaserAction)
+    {
+        EnhancedInputComponentRef->BindAction(FireMiningLaserAction, ETriggerEvent::Started, this, &ASolaraqShipPlayerController::HandleFireMiningLaserStarted);
+        EnhancedInputComponentRef->BindAction(FireMiningLaserAction, ETriggerEvent::Completed, this, &ASolaraqShipPlayerController::HandleFireMiningLaserCompleted);
+        UE_LOG(LogSolaraqSystem, Log, TEXT("ASolaraqShipPlayerController: Bound FireMiningLaserAction."));
+    }
+    else
+    {
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqShipPlayerController: FireMiningLaserAction is NOT assigned! Mining laser input will not work."));
+    }
+
+    if (AimLaserAction) // New binding
+    {
+        EnhancedInputComponentRef->BindAction(AimLaserAction, ETriggerEvent::Triggered, this, &ASolaraqShipPlayerController::HandleAimLaserTriggered);
+        // Completed/Canceled will effectively stop the "Triggered" value from being non-zero if your input system handles that,
+        // or you can explicitly bind them to call HandleAimLaserCompleted.
+        EnhancedInputComponentRef->BindAction(AimLaserAction, ETriggerEvent::Completed, this, &ASolaraqShipPlayerController::HandleAimLaserCompleted);
+        EnhancedInputComponentRef->BindAction(AimLaserAction, ETriggerEvent::Canceled, this, &ASolaraqShipPlayerController::HandleAimLaserCompleted);
+        UE_LOG(LogSolaraqSystem, Log, TEXT("ASolaraqShipPlayerController: Bound AimLaserAction."));
+    }
+    else
+    {
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("ASolaraqShipPlayerController: AimLaserAction is NOT assigned! Mining laser aiming input will not work."));
+    }
     // InteractAction is defined in ASolaraqBasePlayerController
     // Bind it here for ship-specific interaction
     if (InteractAction) { 
@@ -224,7 +271,149 @@ void ASolaraqShipPlayerController::Tick(float DeltaTime)
     {
         UpdateTargetWidgets();
     }
+
+    // --- Update Mining Laser Target ---
+    ASolaraqShipBase* ControlledShip = GetControlledShip();
+    if (ControlledShip)
+    {
+        UMiningLaserComponent* MiningLaser = ControlledShip->FindComponentByClass<UMiningLaserComponent>();
+        
+        if (MiningLaser)
+        {
+            if (!FMath::IsNearlyZero(LastAimLaserInputValue.X) || !FMath::IsNearlyZero(LastAimLaserInputValue.Y))
+            {
+                if (!FMath::IsNearlyZero(LastAimLaserInputValue.X))
+                {
+                    float DeltaYaw = FMath::Sign(LastAimLaserInputValue.X) * LaserRelativeAimRateDegreesPerSecond * DeltaTime;
+                    CurrentLaserRelativeAimYaw = FMath::Clamp(CurrentLaserRelativeAimYaw + DeltaYaw, -MaxLaserRelativeYawDegrees, MaxLaserRelativeYawDegrees);
+                }
+            }
+
+            FVector ShipLocation = ControlledShip->GetActorLocation();
+            FRotator ShipRotation = ControlledShip->GetActorRotation(); 
+            FVector ShipForward = ShipRotation.Vector(); 
+            FVector RelativeAimDirection = UKismetMathLibrary::RotateAngleAxis(ShipForward, CurrentLaserRelativeAimYaw, ControlledShip->GetActorUpVector());
+            FVector NewTargetLocation = ShipLocation + RelativeAimDirection.GetSafeNormal() * MiningLaser->MaxRange;
+            MiningLaser->SetTargetWorldLocation(NewTargetLocation);
+
+
+            // Manage the aiming widget
+            if (MiningLaser->IsLaserActive())
+            {
+                if (!ActiveMiningAimIndicatorWidget && MiningAimIndicatorWidgetClass)
+                {
+                    ActiveMiningAimIndicatorWidget = CreateWidget<UUserWidget>(this, MiningAimIndicatorWidgetClass);
+                    if (ActiveMiningAimIndicatorWidget)
+                    {
+                        ActiveMiningAimIndicatorWidget->AddToViewport();
+                        ActiveMiningAimIndicatorWidget->SetVisibility(ESlateVisibility::Collapsed); 
+                        UE_LOG(LogTemp, Log, TEXT("ShipPC: Created MiningAimIndicatorWidget."));
+                        // Ensure the widget's alignment is set to center if you want the offset to work from its center
+                        // ActiveMiningAimIndicatorWidget->SetAlignmentInViewport(FVector2D(0.5f, 0.5f)); // Optional, depends on widget design
+                    }
+                }
+
+                if (ActiveMiningAimIndicatorWidget)
+                {
+                    FVector2D MuzzleScreenPosition;
+                    const FVector MuzzleLocation = MiningLaser->GetLaserMuzzleLocation();
+                    
+                    if (UGameplayStatics::ProjectWorldToScreen(this, MuzzleLocation, MuzzleScreenPosition, false))
+                    {
+                        FVector2D TargetScreenPosition;
+                        const FVector CurrentLaserTargetWorld = MiningLaser->GetCurrentTargetWorldLocation();
+
+                        if (UGameplayStatics::ProjectWorldToScreen(this, CurrentLaserTargetWorld, TargetScreenPosition, false))
+                        {
+                            FVector2D AimDirectionOnScreen = (TargetScreenPosition - MuzzleScreenPosition);
+                            if (AimDirectionOnScreen.IsNearlyZero()) // If target is right on top of muzzle on screen
+                            {
+                                // Default to pointing "up" or "forward" on screen relative to how your arrow is designed
+                                // For example, if arrow points up, use FVector2D(0, -1)
+                                // Or, get the ship's forward projected to screen if possible (more complex)
+                                // For now, let's make it point towards where the target *would* be if slightly offset
+                                FVector SlightlyForwardFromMuzzle = MuzzleLocation + MiningLaser->GetLaserMuzzleForwardVector() * 100.0f;
+                                FVector2D ForwardScreenPos;
+                                if (UGameplayStatics::ProjectWorldToScreen(this, SlightlyForwardFromMuzzle, ForwardScreenPos, false))
+                                {
+                                    AimDirectionOnScreen = (ForwardScreenPos - MuzzleScreenPosition);
+                                } else {
+                                    AimDirectionOnScreen = FVector2D(0, -1); // Fallback: screen up
+                                }
+                            }
+                            AimDirectionOnScreen.Normalize(); // We only need the direction
+
+                            const float ScreenOffsetDistance = 50.0f; // Adjust this value to your liking (pixels)
+                            FVector2D WidgetScreenPosition = MuzzleScreenPosition + AimDirectionOnScreen * ScreenOffsetDistance;
+
+                            ActiveMiningAimIndicatorWidget->SetPositionInViewport(WidgetScreenPosition, true); // Use true to remove DPI scale for pixel-perfect
+                            ActiveMiningAimIndicatorWidget->SetVisibility(ESlateVisibility::HitTestInvisible);
+
+                            float AngleDegrees = FMath::RadiansToDegrees(FMath::Atan2(AimDirectionOnScreen.Y, AimDirectionOnScreen.X));
+                            
+                            if (ActiveMiningAimIndicatorWidget->GetClass()->ImplementsInterface(UMiningAimWidgetInterface::StaticClass()))
+                            {
+                                IMiningAimWidgetInterface::Execute_SetAimDirection(ActiveMiningAimIndicatorWidget, AngleDegrees);
+                            }
+                            else
+                            {
+                                ActiveMiningAimIndicatorWidget->SetRenderTransformAngle(AngleDegrees);
+                                if (MiningAimIndicatorWidgetClass)
+                                {
+                                    UE_LOG(LogTemp, Warning, TEXT("ShipPC: MiningAimIndicatorWidgetClass '%s' does not implement IMiningAimWidgetInterface. Rotating root widget as fallback."), *MiningAimIndicatorWidgetClass->GetName());
+                                }
+                            }
+                        }
+                        else // Target not on screen, but muzzle is. Hide widget or point towards edge. For now, hide.
+                        {
+                             ActiveMiningAimIndicatorWidget->SetVisibility(ESlateVisibility::Collapsed);
+                        }
+                    }
+                    else // Muzzle not on screen
+                    {
+                        ActiveMiningAimIndicatorWidget->SetVisibility(ESlateVisibility::Collapsed);
+                    }
+                }
+            }
+            else 
+            {
+                if (ActiveMiningAimIndicatorWidget)
+                {
+                    ActiveMiningAimIndicatorWidget->RemoveFromParent();
+                    ActiveMiningAimIndicatorWidget = nullptr;
+                    UE_LOG(LogTemp, Log, TEXT("ShipPC: Removed MiningAimIndicatorWidget (laser inactive)."));
+                }
+            }
+        }
+        else 
+        {
+            if (ActiveMiningAimIndicatorWidget)
+            {
+                ActiveMiningAimIndicatorWidget->RemoveFromParent();
+                ActiveMiningAimIndicatorWidget = nullptr;
+            }
+        }
+    }
+    else 
+    {
+        if (ActiveMiningAimIndicatorWidget)
+        {
+            ActiveMiningAimIndicatorWidget->RemoveFromParent();
+            ActiveMiningAimIndicatorWidget = nullptr;
+        }
+    }
 }
+
+void ASolaraqShipPlayerController::HandleAimLaserTriggered(const FInputActionValue& Value)
+{
+    LastAimLaserInputValue = Value.Get<FVector2D>();
+}
+
+void ASolaraqShipPlayerController::HandleAimLaserCompleted(const FInputActionValue& Value)
+{
+    LastAimLaserInputValue = FVector2D::ZeroVector;
+}
+
 
 // --- Ship Input Handlers (Copied from ASolaraqPlayerController.cpp, GetControlledShip() usage is now direct) ---
 void ASolaraqShipPlayerController::HandleMoveInput(const FInputActionValue& Value)
@@ -337,6 +526,42 @@ void ASolaraqShipPlayerController::HandleToggleShieldInput()
     else
     {
         UE_LOG(LogSolaraqShield, Warning, TEXT("ShipPC %s: HandleToggleShieldInput called, but GetControlledShip() is NULL. Cannot request shield toggle."), *GetNameSafe(this));
+    }
+}
+
+void ASolaraqShipPlayerController::HandleFireMiningLaserStarted(const FInputActionValue& Value)
+{
+    ASolaraqShipBase* ControlledShip = GetControlledShip();
+    if (ControlledShip)
+    {
+        UMiningLaserComponent* MiningLaser = ControlledShip->FindComponentByClass<UMiningLaserComponent>();
+        if (MiningLaser)
+        {
+            MiningLaser->ActivateLaser(true);
+            UE_LOG(LogTemp, Log, TEXT("ShipPC: Mining Laser STARTED by input."));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ShipPC: FireMiningLaserAction STARTED, but controlled ship '%s' has no MiningLaserComponent."), *ControlledShip->GetName());
+        }
+    }
+}
+
+void ASolaraqShipPlayerController::HandleFireMiningLaserCompleted(const FInputActionValue& Value)
+{
+    ASolaraqShipBase* ControlledShip = GetControlledShip();
+    if (ControlledShip)
+    {
+        UMiningLaserComponent* MiningLaser = ControlledShip->FindComponentByClass<UMiningLaserComponent>();
+        if (MiningLaser)
+        {
+            MiningLaser->ActivateLaser(false);
+            UE_LOG(LogTemp, Log, TEXT("ShipPC: Mining Laser COMPLETED/STOPPED by input."));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ShipPC: FireMiningLaserAction COMPLETED, but controlled ship '%s' has no MiningLaserComponent."), *ControlledShip->GetName());
+        }
     }
 }
 

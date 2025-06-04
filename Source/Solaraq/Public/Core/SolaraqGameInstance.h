@@ -13,6 +13,7 @@ class SOLARAQ_API USolaraqGameInstance : public UGameInstance
 public:
 	USolaraqGameInstance();
 
+	
 	// Information about the transition
 	UPROPERTY(BlueprintReadWrite, Category = "Transition")
 	FName TargetLevelToLoad; // Name of the level to load

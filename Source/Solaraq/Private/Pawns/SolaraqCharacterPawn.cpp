@@ -188,26 +188,7 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
         }
 
         SpringArmComponent->TargetOffset = CurrentCameraTargetOffset;
-
-        // --- DEBUG DRAWING ---
-        if (GetWorld())
-        {
-            DrawDebugSphere(GetWorld(), CharacterLocation, 25.0f, 12, FColor::Green, false, -1.0f, 0, 1.0f);
-            FVector SpringArmActualTargetLocation = SpringArmComponent->GetComponentLocation() + SpringArmComponent->TargetOffset;
-            DrawDebugSphere(GetWorld(), SpringArmActualTargetLocation, 30.0f, 12, FColor::Blue, false, -1.0f, 0, 1.0f);
-            
-            DrawDebugLine(GetWorld(), CharacterLocation, SpringArmActualTargetLocation, FColor::Yellow, false, -1.0f, 0, 1.0f);
-            
-            // CurrentMovementDir is now in scope here
-            FString DebugText = FString::Printf(TEXT("ForcedRejoin: %s (StartDir: %s)\nTimeAtMax: %.2f\nOffsetMag: %.1f\nRejoinType: %s\nCurrMoveDir: %s"),
-                bIsInForcedRejoinState ? TEXT("TRUE") : TEXT("FALSE"), 
-                *DirectionWhenForcedRejoinStarted.ToString().Left(15), 
-                TimeAtMaxOffset, 
-                CurrentCameraTargetOffset.Size(), 
-                RejoinInterpolationMethod == ERejoinInterpolationType::Linear ? TEXT("Linear") : TEXT("EaseOut"),
-                *CurrentMovementDir.ToString().Left(15)); 
-            DrawDebugString(GetWorld(), CharacterLocation + FVector(0,0,100), DebugText, nullptr, FColor::White, 0.f, true, 1.f);
-        }
+        
     }
     else if (SpringArmComponent) 
     {

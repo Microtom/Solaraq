@@ -45,15 +45,15 @@ protected:
 
     // Offset in the direction opposite to velocity, making camera look "ahead"
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
-    float CameraLookAheadFactor = 160.0f; 
+    float CameraLookAheadFactor = 150.0f; 
 
     // How quickly the camera returns to center when character stops
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
-    float CameraRecenteringSpeed = 4.0f;
+    float CameraRecenteringSpeed = 2.0f;
 
     // Max distance the camera target can be offset
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
-    float MaxCameraTargetOffset = 160.0f;
+    float MaxCameraTargetOffset = 150.0f;
 
 	// Speed at which the camera target offset "shrinks" back towards the player
 	// when it has reached max offset and player is still moving.

@@ -1,6 +1,7 @@
 // SolaraqGameInstance.cpp
 #include "Core/SolaraqGameInstance.h" // Adjust path as needed
 #include "Logging/SolaraqLogChannels.h"
+#include "Engine/Engine.h"
 
 USolaraqGameInstance::USolaraqGameInstance()
 {
@@ -11,6 +12,8 @@ USolaraqGameInstance::USolaraqGameInstance()
 	PlayerShipNameInOriginLevel = NAME_None;
 	ShipDockedRelativeRotation = FRotator::ZeroRotator;
 }
+
+
 
 void USolaraqGameInstance::PrepareForCharacterLevelLoad(FName InTargetLevel, const FTransform& InShipTransform, FName InOriginLevel, FName InPlayerStartTag, FName InDockingPadIDToReturnTo, FName InPlayerShipName)
 {
