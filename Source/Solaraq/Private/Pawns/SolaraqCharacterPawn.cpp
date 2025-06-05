@@ -16,7 +16,7 @@ ASolaraqCharacterPawn::ASolaraqCharacterPawn()
 
     // Configure character movement
     GetCharacterMovement()->bOrientRotationToMovement = true; // Character moves in the direction of input
-    GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); // Rotation rate
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 200.0f, 0.0f); // Rotation rate
     GetCharacterMovement()->JumpZVelocity = 700.f;
     GetCharacterMovement()->AirControl = 0.35f;
     GetCharacterMovement()->MaxWalkSpeed = 500.f;
@@ -113,7 +113,7 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
                     {
                         bIsInForcedRejoinState = false;
                         TimeAtMaxOffset = 0.0f;
-                        UE_LOG(LogTemp, Verbose, TEXT("Camera: Broke forced rejoin due to direction change. Dot: %.2f"), DotProductWithRejoinStartDir);
+                        UE_LOG(LogSolaraqMovement, Warning, TEXT("Camera: Broke forced rejoin due to direction change. Dot: %.2f"), DotProductWithRejoinStartDir);
                     }
                 }
             }
@@ -128,8 +128,13 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
                 {
                     float CurrentMagnitude = CurrentCameraTargetOffset.Size();
                     float TargetMagnitudeThisFrame = FMath::Max(0.f, CurrentMagnitude - (CameraForcedRejoinSpeed_Linear * DeltaTime));
-                    CurrentCameraTargetOffset = CurrentMovementDir * TargetMagnitudeThisFrame;
-                    // if (TargetMagnitudeThisFrame <= 0.0f) { } // No specific action needed if it hits zero here
+                    // Also, smoothly interpolate the direction of the offset towards the current movement direction.
+                    // This allows the camera to follow turns even while rejoining.
+                    const FVector CurrentOffsetDir = CurrentCameraTargetOffset.GetSafeNormal();
+                    const FVector NewOffsetDir = UKismetMathLibrary::VInterpTo(CurrentOffsetDir, CurrentMovementDir, DeltaTime, CustomCameraLagSpeed).GetSafeNormal();
+                    
+                    // Combine the new direction and new magnitude
+                    CurrentCameraTargetOffset = NewOffsetDir * TargetMagnitudeThisFrame;
                 }
                 else 
                 {
@@ -142,51 +147,64 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
                 float CurrentOffsetMagnitude = CurrentCameraTargetOffset.Size();
                 bool bCurrentlyConsideredAtMax = (CurrentOffsetMagnitude >= EffectiveMaxOffsetThreshold);
 
-                if (bCurrentlyConsideredAtMax)
+                if (!bCurrentlyConsideredAtMax)
                 {
-                    TimeAtMaxOffset += DeltaTime;
-                    if (TimeAtMaxOffset >= DelayBeforeForcedRejoin)
-                    {
-                        bIsInForcedRejoinState = true;
-                        DirectionWhenForcedRejoinStarted = CurrentMovementDir;
-                        UE_LOG(LogTemp, Verbose, TEXT("Camera: Initiated forced rejoin. Dir: %s"), *DirectionWhenForcedRejoinStarted.ToString());
-                        
-                        if (RejoinInterpolationMethod == ERejoinInterpolationType::Linear) {
-                             float CurrentMagnitude = CurrentCameraTargetOffset.Size();
-                             float TargetMagnitudeThisFrame = FMath::Max(0.f, CurrentMagnitude - (CameraForcedRejoinSpeed_Linear * DeltaTime));
-                             CurrentCameraTargetOffset = CurrentMovementDir * TargetMagnitudeThisFrame;
-                        } else {
-                            CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo( CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraForcedRejoinSpeed_Interp);
-                        }
-                    }
-                    else
-                    {
-                        CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(CurrentCameraTargetOffset, ClampedIdealLookAhead, DeltaTime, CustomCameraLagSpeed);
-                        CurrentCameraTargetOffset = CurrentCameraTargetOffset.GetSafeNormal() * MaxCameraTargetOffset;
-                    }
-                }
-                else
-                {
+                    // NOT at max offset: Just smoothly interpolate towards the ideal look-ahead position.
                     TimeAtMaxOffset = 0.0f;
                     CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(CurrentCameraTargetOffset, ClampedIdealLookAhead, DeltaTime, CustomCameraLagSpeed);
                 }
+                else // AT max offset:
+                {
+                    const FVector OffsetDirection = CurrentCameraTargetOffset.GetSafeNormal();
+                    const float DotProduct = FVector::DotProduct(CurrentMovementDir, OffsetDirection);
+
+                    // Check if direction has reversed. If so, we need to swing, not orbit or rejoin.
+                    if (DotProduct < RejoinDirectionChangeThreshold)
+                    {
+                        // SWING: Direction reversed. Let the camera swing freely across the center.
+                        // DO NOT clamp magnitude here. Reset timer.
+                        TimeAtMaxOffset = 0.0f;
+                        UE_LOG(LogSolaraqMovement, Warning, TEXT("Camera: Swinging due to major direction change. Dot: %.2f"), DotProduct);
+                        CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(CurrentCameraTargetOffset, ClampedIdealLookAhead, DeltaTime, CustomCameraLagSpeed);
+                    }
+                    else // Direction is still consistent.
+                    {
+                        TimeAtMaxOffset += DeltaTime;
+                        if (TimeAtMaxOffset >= DelayBeforeForcedRejoin)
+                        {
+                            // REJOIN: Delay is over, start rejoining.
+                             bIsInForcedRejoinState = true;
+                             DirectionWhenForcedRejoinStarted = CurrentMovementDir;
+                             UE_LOG(LogSolaraqMovement, Warning, TEXT("Camera: Initiated forced rejoin. Dir: %s."), *DirectionWhenForcedRejoinStarted.ToString());
+                        }
+                        else
+                        {
+                            // ORBIT: Waiting for rejoin timer. Keep camera at max offset while interpolating direction.
+                            CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(CurrentCameraTargetOffset, ClampedIdealLookAhead, DeltaTime, CustomCameraLagSpeed);
+                            CurrentCameraTargetOffset = CurrentCameraTargetOffset.GetSafeNormal() * MaxCameraTargetOffset;
+                        }
+                    }
+               }
             }
             LastMovementDirection = CurrentMovementDir;
         }
         else // CHARACTER IS STOPPED
         {
-            // CurrentMovementDir remains ZeroVector as initialized
             CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraRecenteringSpeed);
             bIsInForcedRejoinState = false;
             TimeAtMaxOffset = 0.0f;
-            LastMovementDirection = FVector::ZeroVector; // Already ZeroVector from CurrentMovementDir
+            LastMovementDirection = FVector::ZeroVector; 
             DirectionWhenForcedRejoinStarted = FVector::ZeroVector;
         }
         
         if (!bIsInForcedRejoinState) {
             DirectionWhenForcedRejoinStarted = FVector::ZeroVector;
         }
-
+        
+        // Comprehensive logging for debugging camera behavior
+        const FString LogMsg = FString::Printf(TEXT("PawnCam: Vel(%.0f, %.0f) | Offset(%.0f, %.0f) | Rejoin=%d | Time@Max=%.2f | MoveDir(%.1f, %.1f)"), GetVelocity().X, GetVelocity().Y, CurrentCameraTargetOffset.X, CurrentCameraTargetOffset.Y, bIsInForcedRejoinState, TimeAtMaxOffset, CurrentMovementDir.X, CurrentMovementDir.Y);
+        UE_LOG(LogSolaraqMovement, Warning, TEXT("%s"), *LogMsg);
+        
         SpringArmComponent->TargetOffset = CurrentCameraTargetOffset;
         
     }

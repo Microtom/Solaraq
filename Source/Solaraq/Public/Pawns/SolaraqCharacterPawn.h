@@ -1,3 +1,4 @@
+
 // SolaraqCharacterPawn.h
 #pragma once
 
@@ -41,7 +42,7 @@ protected:
     bool bUseCustomCameraLag = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
-    float CustomCameraLagSpeed = 5.0f;
+    float CustomCameraLagSpeed = 2.0f;
 
     // Offset in the direction opposite to velocity, making camera look "ahead"
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
@@ -54,16 +55,11 @@ protected:
     // Max distance the camera target can be offset
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
     float MaxCameraTargetOffset = 150.0f;
-
-	// Speed at which the camera target offset "shrinks" back towards the player
-	// when it has reached max offset and player is still moving.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
-	float CameraForcedRejoinSpeed = 1.0f; // Slower than CustomCameraLagSpeed
-
-	// (Optional) A small delay once max offset is reached before forced rejoin begins.
-	// If 0, rejoin starts immediately once max offset is hit.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
-	float DelayBeforeForcedRejoin = 0.25f;
+	
+ 	// (Optional) A small delay once max offset is reached before forced rejoin begins.
+ 	// If 0, rejoin starts immediately once max offset is hit.
+ 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
+ 	float DelayBeforeForcedRejoin = 0.25f;
 
 	// Speed at which the camera target offset "shrinks" back towards the player
 	// when it has reached max offset and player is still moving. (Non-linear interp speed)
