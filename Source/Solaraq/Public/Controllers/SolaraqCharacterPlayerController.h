@@ -43,6 +43,12 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
     TObjectPtr<UInputAction> CharacterMoveAction;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
+    TObjectPtr<UInputAction> PrimaryUseAction;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
+    TObjectPtr<UInputAction> SecondaryUseAction;
+    
     // Add other character actions here (e.g., Jump, Look, Crouch)
     // UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
     // TObjectPtr<UInputAction> CharacterLookAction;
@@ -57,6 +63,10 @@ protected:
     // void HandleCharacterLookInput(const FInputActionValue& Value);
     // void HandleCharacterJumpInput();
     void HandleCharacterInteractInput(); // Specific handler for character interaction
+    void HandlePrimaryUseStarted();
+    void HandlePrimaryUseCompleted(); // For 'Release' triggers
+    void HandleSecondaryUseStarted();
+    void HandleSecondaryUseCompleted();
 
 private:
     // No longer need specific PossessedCharacterPawn, GetControlledCharacter() will cast GetPawn()

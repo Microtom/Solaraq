@@ -1,4 +1,3 @@
-// ItemActorBase.cpp
 #include "Items/ItemActorBase.h"
 #include "Pawns/SolaraqCharacterPawn.h"
 
@@ -9,21 +8,26 @@ AItemActorBase::AItemActorBase()
 	RootComponent = DefaultSceneRoot;
 }
 
-void AItemActorBase::OnEquip(ASolaraqCharacterPawn* NewOwner)
+void AItemActorBase::SetOwningPawn(ASolaraqCharacterPawn* NewOwner)
 {
 	OwningPawn = NewOwner;
-	SetOwner(NewOwner); // Set the actor-level owner
+}
+
+void AItemActorBase::OnEquip()
+{
+	// Base implementation does nothing. Child classes override this.
+	// e.g., A weapon might play an equip sound here.
 }
 
 void AItemActorBase::OnUnequip()
 {
-	OwningPawn = nullptr;
-	SetOwner(nullptr);
+	// Base implementation does nothing. Child classes override this.
+	// e.g., A fishing rod might tell the FishingSubsystem to reset.
 }
 
 void AItemActorBase::PrimaryUse()
 {
-	// Base implementation does nothing. Overridden in child classes (e.g., Weapon fires, Fishing Rod casts line)
+	// Base implementation does nothing.
 }
 
 void AItemActorBase::PrimaryUse_Stop()
