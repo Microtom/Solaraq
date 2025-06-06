@@ -24,10 +24,6 @@
 			]
 		},
 		{
-			"Name": "OnlineSubsystemSteam",
-			"Enabled": true
-		},
-		{
 			"Name": "EditorPerformance",
 			"Enabled": false
 		},

@@ -7,6 +7,7 @@
 #include "Core/SolaraqGameInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "Logging/SolaraqLogChannels.h"
+#include "Components/DockingPadComponent.h"
 #include "Pawns/SolaraqCharacterPawn.h" // Included for completeness if base ever needs to know about it
 #include "Pawns/SolaraqShipBase.h"       // Included for GI preparation
 
@@ -79,7 +80,7 @@ void ASolaraqBasePlayerController::RequestCharacterLevelTransition(FName TargetL
     // For now, as a placeholder until Server RPC is in derived class or ship:
     if (IsLocalPlayerController()) // To avoid issues if called on server directly by mistake
     {
-        Server_InitiateSeamlessTravelToLevel(TargetLevelName, true, DockingPadID, FromShip);
+        Server_InitiateSeamlessTravelToLevel(TargetLevelName, true, DockingPadID);
     }
 }
 
@@ -94,7 +95,7 @@ void ASolaraqBasePlayerController::RequestShipLevelTransition(FName TargetShipLe
     }
 }
 
-void ASolaraqBasePlayerController::Server_InitiateSeamlessTravelToLevel(FName TargetLevelName, bool bIsCharacterLevel, FName PlayerStartOrPadID, ASolaraqShipBase* FromShipForGI)
+void ASolaraqBasePlayerController::Server_InitiateSeamlessTravelToLevel(FName TargetLevelName, bool bIsCharacterLevel, FName PlayerStartOrPadID)
 {
     // This function MUST run on the server.
     if (!HasAuthority())
@@ -106,76 +107,31 @@ void ASolaraqBasePlayerController::Server_InitiateSeamlessTravelToLevel(FName Ta
         UE_LOG(LogSolaraqTransition, Error, TEXT("BasePC %s: Server_InitiateSeamlessTravelToLevel called by non-authority! This is incorrect. Client should RPC to server."), *GetNameSafe(this));
         return;
     }
-
-    USolaraqGameInstance* GI = GetSolaraqGameInstance();
-    if (!GI)
-    {
-        UE_LOG(LogSolaraqTransition, Error, TEXT("BasePC %s: Cannot transition, GetSolaraqGameInstance() returned NULL."), *GetNameSafe(this));
-        return;
-    }
-
     FString TravelURL = TargetLevelName.ToString();
-    // Seamless travel requires the ?listen option for the server to continue hosting
-    // and for clients to maintain their connection through the transition map.
-    TravelURL += TEXT("?listen");
+    
+    UE_LOG(LogSolaraqTransition, Log, TEXT("BasePC %s (SERVER): EXECUTING a generic ClientTravel request to URL: '%s'."),
+        *GetNameSafe(this), *TravelURL);
+        
+    // This is now the ONLY thing this function does. It is clean of any AActor* references.
+    ClientTravel(TravelURL, ETravelType::TRAVEL_Absolute, true /*bSeamless*/, FGuid());
+}
 
-    UE_LOG(LogSolaraqTransition, Log, TEXT("BasePC %s (SERVER): Initiating seamless travel for its client to URL: '%s'. IsCharLevel: %d, Start/PadID: '%s'"),
-        *GetNameSafe(this), *TravelURL, bIsCharacterLevel, *PlayerStartOrPadID.ToString());
-
-    // --- Prepare GameInstance with necessary data BEFORE ClientTravel ---
-    // This data will be used by the GameMode of the target level when this client arrives.
-    if (bIsCharacterLevel)
+void ASolaraqBasePlayerController::HostGame()
+{
+    USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
+    if (GI)
     {
-        if (!FromShipForGI)
-        {
-            UE_LOG(LogSolaraqTransition, Error, TEXT("BasePC %s: Cannot transition to character level, FromShipForGI is NULL. GI data cannot be prepared."), *GetNameSafe(this));
-            return;
-        }
-        if (PlayerStartOrPadID == NAME_None)
-        {
-             UE_LOG(LogSolaraqTransition, Warning, TEXT("BasePC %s: PlayerStartOrPadID is NAME_None for character level transition. PlayerStart might be arbitrary."), *GetNameSafe(this));
-        }
-
-        FString CurrentSpaceLevelNameString = GetWorld() ? GetWorld()->GetName() : TEXT("UnknownSpaceLevel");
-        FName OriginSpaceLevelName = FName(*CurrentSpaceLevelNameString);
-        FName PlayerShipActorName = FromShipForGI->GetFName();
-        FTransform ShipTransformInOrigin = FromShipForGI->GetActorTransform();
-        FRotator ShipDockedRelativeRotation = FromShipForGI->GetActualDockingTargetRelativeRotation(); // Assuming this getter exists and returns the correct value
-
-        GI->PrepareForCharacterLevelLoad(
-            TargetLevelName,
-            ShipTransformInOrigin,
-            OriginSpaceLevelName,
-            PlayerStartOrPadID,        // Used as PlayerStartTag in Character Level
-            PlayerStartOrPadID,        // Also used as DockingPadIdentifierToReturnTo
-            PlayerShipActorName,
-            ShipDockedRelativeRotation // Pass the relative rotation
-        );
-         UE_LOG(LogSolaraqTransition, Log, TEXT("  GI Prepared for Character: TargetLvl='%s', OriginLvl='%s', PlayerStartTag='%s', ReturnPadID='%s', ShipName='%s', RelRot='%s'"),
-            *TargetLevelName.ToString(), *OriginSpaceLevelName.ToString(), *PlayerStartOrPadID.ToString(), *PlayerStartOrPadID.ToString(), *PlayerShipActorName.ToString(), *ShipDockedRelativeRotation.ToString());
+        GI->HostSession();
     }
-    else // Transitioning to Ship Level
+}
+
+void ASolaraqBasePlayerController::JoinGame()
+{
+    USolaraqGameInstance* GI = GetGameInstance<USolaraqGameInstance>();
+    if (GI)
     {
-        FString CurrentCharacterLevelNameString = GetWorld() ? GetWorld()->GetName() : TEXT("UnknownCharacterLevel");
-        FName CurrentCharacterLevelName = FName(*CurrentCharacterLevelNameString);
-
-        GI->PrepareForShipLevelLoad(TargetLevelName, CurrentCharacterLevelName);
-         UE_LOG(LogSolaraqTransition, Log, TEXT("  GI Prepared for Ship: TargetLvl='%s', OriginLvl='%s'. (ReturnShipName='%s', ReturnPadID='%s' should already be in GI)"),
-            *TargetLevelName.ToString(), *CurrentCharacterLevelName.ToString(), *GI->PlayerShipNameInOriginLevel.ToString(), *GI->DockingPadIdentifierToReturnTo.ToString());
+        GI->FindAndJoinSession();
     }
-    // --- End GI Preparation ---
-
-
-    // The server tells this specific client's PlayerController to travel.
-    // The client will load the transition map, then the target map, while staying connected.
-    ClientTravel(TravelURL, ETravelType::TRAVEL_Absolute, true /*bSeamless*/, FGuid() /*MapPackageGuid - can be empty for non-package maps*/);
-
-    // Note: The server itself doesn't call UGameplayStatics::OpenLevel or GetWorld()->ServerTravel here
-    // if only one client is transitioning. If ALL clients were to transition, then the server
-    // would use GetWorld()->ServerTravel(TravelURL, true /*bSeamless*/);
-    // For individual client transitions to sub-levels (like interiors) while others remain in the main world,
-    // ClientTravel is appropriate. The server's GameMode in the target level will handle this client
-    // once they arrive.
 }
 
 

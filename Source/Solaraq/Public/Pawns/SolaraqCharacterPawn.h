@@ -8,9 +8,8 @@
 
 class UCameraComponent;
 class USpringArmComponent;
-// class UInputMappingContext; // Not needed in pawn.h
-// class UInputAction; // Not needed in pawn.h
-// struct FInputActionValue; // Not needed in pawn.h
+class UInventoryComponent;
+class UEquipmentComponent;
 
 UENUM(BlueprintType)
 enum class ERejoinInterpolationType : uint8
@@ -27,7 +26,9 @@ class SOLARAQ_API ASolaraqCharacterPawn : public ACharacter
 public:
 	ASolaraqCharacterPawn();
 
-
+	FORCEINLINE class UInventoryComponent* GetInventoryComponent() const { return InventoryComponent; }
+	FORCEINLINE class UEquipmentComponent* GetEquipmentComponent() const { return EquipmentComponent; }
+	
 protected:
 	virtual void BeginPlay() override;
 
@@ -44,6 +45,13 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
     float CustomCameraLagSpeed = 2.0f;
 
+	// --- Inventory ---
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+	TObjectPtr<UInventoryComponent> InventoryComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment") // <-- Add this
+	TObjectPtr<UEquipmentComponent> EquipmentComponent;
+	
     // Offset in the direction opposite to velocity, making camera look "ahead"
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
     float CameraLookAheadFactor = 150.0f; 

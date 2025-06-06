@@ -3,16 +3,20 @@
 
 #include "EngineUtils.h"
 #include "Pawns/SolaraqShipBase.h"
-//#include "Controllers/SolaraqPlayerController.h"
 #include "Controllers/SolaraqShipPlayerController.h"
 #include "Core/SolaraqGameInstance.h"
+#include "GameFramework/GameStateBase.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerStart.h"
 #include "Logging/SolaraqLogChannels.h"
 #include "UObject/ConstructorHelpers.h"
+#include "GameFramework/PlayerState.h" 
 
 ASolaraqSpaceLevelGameMode::ASolaraqSpaceLevelGameMode()
 {
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = true;
+    
     bUseSeamlessTravel = true;
     
     // Set the C++ default for the PlayerControllerClass member inherited from AGameModeBase
@@ -33,12 +37,104 @@ ASolaraqSpaceLevelGameMode::ASolaraqSpaceLevelGameMode()
         *GetNameSafe(PlayerControllerClass), *GetNameSafe(DefaultPawnClass));
 }
 
+void ASolaraqSpaceLevelGameMode::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+
+    if (GEngine)
+    {
+        FString DebugString = FString::Printf(TEXT("SERVER PLAYER STATUS (World: %s)"), *GetWorld()->GetName());
+
+        // The GameState holds the list of all connected players.
+        if (GameState && GameState->PlayerArray.Num() > 0)
+        {
+            // Iterate over all PlayerStates in the game.
+            for (APlayerState* PlayerState : GameState->PlayerArray)
+            {
+                if (PlayerState)
+                {
+                    // Get the PlayerController from the PlayerState.
+                    APlayerController* PC = PlayerState->GetPlayerController();
+                    FString PlayerName = PlayerState->GetPlayerName();
+                    
+                    if (PC)
+                    {
+                        // Get the Pawn the controller is currently possessing.
+                        APawn* CurrentPawn = PC->GetPawn();
+                        FString PawnName = GetNameSafe(CurrentPawn);
+                        
+                        // Get the Level the PlayerController is currently in. THIS IS THE KEY.
+                        ULevel* PlayerLevel = PC->GetLevel();
+                        FString LevelName = GetNameSafe(PlayerLevel);
+
+                        DebugString += FString::Printf(TEXT("\n - Player: %s | Level: %s | Pawn: %s"), *PlayerName, *LevelName, *PawnName);
+                    }
+                    else
+                    {
+                        // This can happen briefly during transitions.
+                        DebugString += FString::Printf(TEXT("\n - Player: %s | (No PlayerController)"), *PlayerName);
+                    }
+                }
+            }
+        }
+        else
+        {
+            DebugString += "\n(No players in GameState)";
+        }
+
+        GEngine->AddOnScreenDebugMessage(12345, 0.0f, FColor::Cyan, DebugString, false, FVector2D(1.5f, 1.5f));
+    }
+
+    // --- Throttled UE_LOG message (every LogInterval seconds) ---
+    TimeSinceLastLog += DeltaSeconds;
+    if (TimeSinceLastLog >= LogInterval)
+    {
+        TimeSinceLastLog = 0.0f; // Reset the timer
+
+        FString LogString = FString::Printf(TEXT("SERVER WORLD STATE REPORT (GameMode: %s, World: %s)"), *GetName(), *GetWorld()->GetName());
+        if (GameState && GameState->PlayerArray.Num() > 0)
+        {
+            for (APlayerState* PlayerState : GameState->PlayerArray)
+            {
+                if (PlayerState)
+                {
+                    APlayerController* PC = PlayerState->GetPlayerController();
+                    FString PlayerName = PlayerState->GetPlayerName();
+                    
+                    if (PC)
+                    {
+                        APawn* CurrentPawn = PC->GetPawn();
+                        FString PawnName = GetNameSafe(CurrentPawn);
+                        ULevel* PlayerLevel = PC->GetLevel();
+                        FString LevelName = GetNameSafe(PlayerLevel);
+
+                        LogString += FString::Printf(TEXT("\n\t> Player: [%s] is in Level: [%s] controlling Pawn: [%s]"), 
+                            *PlayerName, *LevelName, *PawnName);
+                    }
+                    else
+                    {
+                        LogString += FString::Printf(TEXT("\n\t> Player: [%s] has no valid PlayerController."), *PlayerName);
+                    }
+                }
+            }
+        }
+        else
+        {
+            LogString += "\n\t(No players in GameState)";
+        }
+
+        // Log to the "LogSolaraqTransition" category for easy filtering.
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("%s"), *LogString);
+    }
+}
+
 // Let Super handle these for now to mimic AGameModeBase behavior
 AActor* ASolaraqSpaceLevelGameMode::FindPlayerStart_Implementation(AController* Player, const FString& IncomingName)
 {
     
     UE_LOG(LogSolaraqSystem, Log, TEXT("ASolaraqSpaceLevelGameMode (Restored FindPlayerStart): Not a transition with GI data, or data invalid. Calling Super::FindPlayerStart_Implementation for %s."), *GetNameSafe(Player));
-    return Super::FindPlayerStart_Implementation(Player, IncomingName); 
+    return Super::FindPlayerStart_Implementation(Player, IncomingName);
+    
 }
 
 

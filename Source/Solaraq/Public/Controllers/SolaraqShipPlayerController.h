@@ -21,14 +21,14 @@ class SOLARAQ_API ASolaraqShipPlayerController : public ASolaraqBasePlayerContro
 public:
     ASolaraqShipPlayerController();
 
-    void RequestTransitionToCharacterLevel(FName TargetLevelName, FName DockingPadID, ASolaraqShipBase* FromShip);
+    void RequestTransitionToCharacterLevel(FName TargetLevelName, FName DockingPadID);
     
     // --- Pawn Getter ---
     ASolaraqShipBase* GetControlledShip() const;
-
+    
     // Server RPC called by the client-side RequestTransitionToCharacterLevel
     UFUNCTION(Server, Reliable, WithValidation)
-    void Server_ExecuteTransitionToCharacterLevel(FName TargetLevelName, FName DockingPadID, ASolaraqShipBase* FromShip);
+    void Server_ExecuteTransitionToCharacterLevel(FName TargetLevelName, FName DockingPadID);
 
 
 protected:

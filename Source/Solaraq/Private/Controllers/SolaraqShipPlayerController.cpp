@@ -6,12 +6,14 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputAction.h"
+#include "Components/DockingPadComponent.h"
 #include "UI/MiningAimWidgetInterface.h"
 #include "Blueprint/UserWidget.h" // For target markers
 #include "UI/TargetWidgetInterface.h" // For target markers
 #include "Kismet/GameplayStatics.h" // For ProjectWorldToScreen
 #include "EngineUtils.h" // For TActorIterator
 #include "Components/MiningLaserComponent.h"
+#include "Core/SolaraqGameInstance.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Logging/SolaraqLogChannels.h"
 
@@ -26,19 +28,13 @@ ASolaraqShipPlayerController::ASolaraqShipPlayerController()
     ActiveMiningAimIndicatorWidget = nullptr;
 }
 
-void ASolaraqShipPlayerController::RequestTransitionToCharacterLevel(FName TargetLevelName, FName DockingPadID,
-    ASolaraqShipBase* FromShip)
+void ASolaraqShipPlayerController::RequestTransitionToCharacterLevel(FName TargetLevelName, FName DockingPadID)
 {
-    if (!FromShip)
-    {
-        UE_LOG(LogSolaraqTransition, Error, TEXT("ShipPC %s: RequestTransitionToCharacterLevel called with no FromShip!"), *GetNameSafe(this));
-        return;
-    }
-    UE_LOG(LogSolaraqTransition, Log, TEXT("ShipPC %s: Requesting transition to character level '%s' from ship '%s' at pad '%s'."),
-        *GetNameSafe(this), *TargetLevelName.ToString(), *FromShip->GetName(), *DockingPadID.ToString());
+    UE_LOG(LogSolaraqTransition, Log, TEXT("ShipPC %s: Requesting transition to character level '%s' for pad '%s'."),
+        *GetNameSafe(this), *TargetLevelName.ToString(), *DockingPadID.ToString());
 
-    // Call the Server RPC
-    Server_ExecuteTransitionToCharacterLevel(TargetLevelName, DockingPadID, FromShip);
+    // Call the Server RPC without the ship pointer
+    Server_ExecuteTransitionToCharacterLevel(TargetLevelName, DockingPadID);
 }
 
 ASolaraqShipBase* ASolaraqShipPlayerController::GetControlledShip() const
@@ -47,23 +43,69 @@ ASolaraqShipBase* ASolaraqShipPlayerController::GetControlledShip() const
 }
 
 void ASolaraqShipPlayerController::Server_ExecuteTransitionToCharacterLevel_Implementation(FName TargetLevelName,
-    FName DockingPadID, ASolaraqShipBase* FromShip)
+    FName DockingPadID)
 {
-    UE_LOG(LogSolaraqTransition, Log, TEXT("ShipPC %s (SERVER): Executing transition to character level '%s' from ship '%s' at pad '%s'."),
-        *GetNameSafe(this), *TargetLevelName.ToString(), *FromShip->GetName(), *DockingPadID.ToString());
+    // STEP 1: All preparation and actor interaction happens here.
+    if (!HasAuthority()) return;
 
-    // Now call the base class's authoritative function to handle GI prep and ClientTravel
-    Super::Server_InitiateSeamlessTravelToLevel(TargetLevelName, true /*bIsCharacterLevel*/, DockingPadID, FromShip);
+    ASolaraqShipBase* FromShip = GetControlledShip();
+    if (!FromShip)
+    {
+        UE_LOG(LogSolaraqTransition, Error, TEXT("ShipPC %s (SERVER): PREP FAILED. GetControlledShip() is NULL."), *GetNameSafe(this));
+        return;
+    }
+
+    USolaraqGameInstance* GI = GetSolaraqGameInstance();
+    if (!GI)
+    {
+        UE_LOG(LogSolaraqTransition, Error, TEXT("ShipPC %s (SERVER): PREP FAILED. GetSolaraqGameInstance() returned NULL."), *GetNameSafe(this));
+        return;
+    }
+
+    UE_LOG(LogSolaraqTransition, Log, TEXT("ShipPC %s (SERVER): Preparing transition for ship '%s' to level '%s'."),
+        *GetNameSafe(this), *FromShip->GetName(), *TargetLevelName.ToString());
+
+    // Prepare the Game Instance
+    FString CurrentSpaceLevelNameString = GetWorld() ? GetWorld()->GetName() : TEXT("UnknownSpaceLevel");
+    FName OriginSpaceLevelName = FName(*CurrentSpaceLevelNameString);
+    FName PlayerShipActorName = FromShip->GetFName();
+    FTransform ShipTransformInOrigin = FromShip->GetActorTransform();
+    FRotator ShipDockedRelativeRotation = FromShip->GetActualDockingTargetRelativeRotation();
+
+    GI->PrepareForCharacterLevelLoad(
+        TargetLevelName,
+        ShipTransformInOrigin,
+        OriginSpaceLevelName,
+        DockingPadID, // This is the PlayerStartTag / ReturnPadID
+        DockingPadID,
+        PlayerShipActorName,
+        ShipDockedRelativeRotation
+    );
+    UE_LOG(LogSolaraqTransition, Log, TEXT("  GI Prepared for Character: TargetLvl='%s', OriginLvl='%s', PlayerStartTag='%s', ReturnPadID='%s'"),
+        *TargetLevelName.ToString(), *OriginSpaceLevelName.ToString(), *DockingPadID.ToString(), *DockingPadID.ToString());
+
+    // Free up the docking pad.
+    if (FromShip->IsShipDocked())
+    {
+        if (UDockingPadComponent* Pad = FromShip->GetActiveDockingPad())
+        {
+            Pad->ClearOccupyingShip_Server();
+            UE_LOG(LogSolaraqTransition, Warning, TEXT("  DockingPad '%s' has been cleared."), *Pad->GetName());
+        }
+    }
+
+    // STEP 2: Now that all prep is done, call the clean travel function.
+    UE_LOG(LogSolaraqTransition, Log, TEXT("  Preparation complete. Calling base function to execute travel."));
+    Super::Server_InitiateSeamlessTravelToLevel(TargetLevelName, true, DockingPadID);
 }
 
 bool ASolaraqShipPlayerController::Server_ExecuteTransitionToCharacterLevel_Validate(FName TargetLevelName,
-    FName DockingPadID, ASolaraqShipBase* FromShip)
+    FName DockingPadID)
 {
-    // Add validation: Is TargetLevelName valid? Is FromShip not null and a valid ship controlled by this PC?
-    // For now, basic validation.
-    if (!FromShip || FromShip->GetController() != this) // Basic check: is this my ship?
+    // We can just validate that the controller actually has a ship.
+    if (!GetControlledShip())
     {
-        UE_LOG(LogSolaraqTransition, Warning, TEXT("ShipPC %s: Server_ExecuteTransitionToCharacterLevel_Validate failed. FromShip is null or not controlled by this PC."), *GetNameSafe(this));
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("ShipPC %s: Server_ExecuteTransitionToCharacterLevel_Validate failed. Controller has no ship."), *GetNameSafe(this));
         return false;
     }
     return true;
@@ -497,15 +539,30 @@ void ASolaraqShipPlayerController::HandleShipInteractInput()
 {
     UE_LOG(LogSolaraqTransition, Warning, TEXT("ShipPC %s: HandleShipInteractInput called."), *GetNameSafe(this));
     ASolaraqShipBase* Ship = GetControlledShip();
-    if (Ship && Ship->IsShipDocked())
+
+    // The ship's internal logic is what matters for docking status and pad info.
+    if (Ship && Ship->IsShipDocked() && Ship->GetActiveDockingPad())
     {
-        // The ship's RequestInteraction will call ASolaraqBasePlayerController::InitiateLevelTransitionToCharacter
-        Ship->RequestInteraction(); 
-        UE_LOG(LogSolaraqTransition, Warning, TEXT("ShipPC: Sent Interact request to docked ship %s."), *Ship->GetName());
+        // Get the info from the docked ship and its pad
+        UDockingPadComponent* Pad = Ship->GetActiveDockingPad();
+        
+        FName TargetLevelName = Pad->TargetCharacterLevelName;
+        if (!Ship->CharacterLevelOverrideName.IsNone())
+        {
+            TargetLevelName = Ship->CharacterLevelOverrideName;
+        }
+
+        FName DockingPadID = Pad->DockingPadUniqueID;
+
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("ShipPC: Ship %s is docked. Calling RequestTransitionToCharacterLevel with Level: %s, PadID: %s"), 
+            *Ship->GetName(), *TargetLevelName.ToString(), *DockingPadID.ToString());
+        
+        // Call our own client-side function that triggers the server RPC
+        RequestTransitionToCharacterLevel(TargetLevelName, DockingPadID);
     }
     else if (Ship)
     {
-        UE_LOG(LogSolaraqTransition, Warning, TEXT("ShipPC: Interact pressed, but ship %s is not docked."), *Ship->GetName());
+        UE_LOG(LogSolaraqTransition, Warning, TEXT("ShipPC: Interact pressed, but ship %s is not docked or has no active pad."), *Ship->GetName());
     }
     else
     {

@@ -42,9 +42,16 @@ public:
 
     // Server-side function to instruct this player controller's client to seamlessly travel.
     // This is called ON THE SERVER by game logic (e.g., after a client makes a Server RPC request to transition).
-    virtual void Server_InitiateSeamlessTravelToLevel(FName TargetLevelName, bool bIsCharacterLevel, FName PlayerStartOrPadID = NAME_None, ASolaraqShipBase* FromShipForGI = nullptr);
+    virtual void Server_InitiateSeamlessTravelToLevel(FName TargetLevelName, bool bIsCharacterLevel, FName PlayerStartOrPadID = NAME_None);
 
+    // Console command to host a game
+    UFUNCTION(Exec)
+    void HostGame();
 
+    // Console command to join a game
+    UFUNCTION(Exec)
+    void JoinGame();
+    
 protected:
     //~ Begin APlayerController Interface
     virtual void BeginPlay() override;
