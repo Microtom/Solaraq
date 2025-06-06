@@ -126,6 +126,16 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
     } else {
         UE_LOG(LogSolaraqTransition, Error, TEXT("ASolaraqCharacterPlayerController %s: SetupInputComponent - InteractAction IS NULL! Cannot bind HandleCharacterInteractInput."), *GetNameSafe(this));
     }
+    if (PrimaryUseAction)
+    {
+        EnhancedInputComponentRef->BindAction(PrimaryUseAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandlePrimaryUseStarted);
+        EnhancedInputComponentRef->BindAction(PrimaryUseAction, ETriggerEvent::Completed, this, &ASolaraqCharacterPlayerController::HandlePrimaryUseCompleted);
+    }
+    if (SecondaryUseAction)
+    {
+        EnhancedInputComponentRef->BindAction(SecondaryUseAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleSecondaryUseStarted);
+        EnhancedInputComponentRef->BindAction(SecondaryUseAction, ETriggerEvent::Completed, this, &ASolaraqCharacterPlayerController::HandleSecondaryUseCompleted);
+    }
 }
 
 void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
@@ -187,5 +197,49 @@ void ASolaraqCharacterPlayerController::HandleCharacterInteractInput()
     else
     {
         UE_LOG(LogSolaraqTransition, Error, TEXT("CharacterPC %s: GetControlledCharacter() returned NULL."), *GetNameSafe(this));
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandlePrimaryUseStarted()
+{
+    if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
+    {
+        if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
+        {
+            EquipComp->HandlePrimaryUse(); // Pass the command to the pawn's component
+        }
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandlePrimaryUseCompleted()
+{
+    if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
+    {
+        if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
+        {
+            EquipComp->HandlePrimaryUse_Stop(); // Pass the command to the pawn's component
+        }
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandleSecondaryUseStarted()
+{
+    if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
+    {
+        if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
+        {
+            EquipComp->HandleSecondaryUse(); // Pass the command to the pawn's component
+        }
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandleSecondaryUseCompleted()
+{
+    if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
+    {
+        if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
+        {
+            EquipComp->HandleSecondaryUse_Stop(); // Pass the command to the pawn's component
+        }
     }
 }

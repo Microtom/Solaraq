@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Items/InventoryComponent.h"
+#include "Components/EquipmentComponent.h" 
 #include "SolaraqCharacterPawn.generated.h"
 
 class UCameraComponent;
