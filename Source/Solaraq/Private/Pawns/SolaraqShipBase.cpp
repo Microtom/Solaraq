@@ -1023,7 +1023,7 @@ void ASolaraqShipBase::Server_RequestTransitionToCharacterLevel_Implementation(F
             *GetName(), *PC->GetName(), *TargetLevel.ToString(), *DockingPadID.ToString());
 
         // The PlayerController will handle GameInstance prep and then call ClientTravel on itself (server-side instance).
-        PC->Server_InitiateSeamlessTravelToLevel(TargetLevel, true, DockingPadID, this);
+        PC->Server_InitiateSeamlessTravelToLevel(TargetLevel, true, DockingPadID);
     }
     else
     {

@@ -8,6 +8,8 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "UObject/ConstructorHelpers.h"
 #include "DrawDebugHelpers.h"
+#include "Components/EquipmentComponent.h"
+#include "Items/InventoryComponent.h"
 #include "Logging/SolaraqLogChannels.h" // Your log channels
 
 ASolaraqCharacterPawn::ASolaraqCharacterPawn()
@@ -45,6 +47,10 @@ ASolaraqCharacterPawn::ASolaraqCharacterPawn()
     CameraComponent->SetupAttachment(SpringArmComponent, USpringArmComponent::SocketName); // Attach camera to end of boom
     CameraComponent->bUsePawnControlRotation = false; // Camera does not rotate relative to arm
 
+    // Create an inventory component
+    InventoryComponent = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
+    EquipmentComponent = CreateDefaultSubobject<UEquipmentComponent>(TEXT("EquipmentComponent"));
+    
     // Set a default mesh (UE Mannequin)
     // You might need to adjust the path depending on your engine version or if you have custom content
     static ConstructorHelpers::FObjectFinder<USkeletalMesh> CharacterMeshAsset(TEXT("/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple"));
@@ -164,7 +170,7 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
                         // SWING: Direction reversed. Let the camera swing freely across the center.
                         // DO NOT clamp magnitude here. Reset timer.
                         TimeAtMaxOffset = 0.0f;
-                        UE_LOG(LogSolaraqMovement, Warning, TEXT("Camera: Swinging due to major direction change. Dot: %.2f"), DotProduct);
+                        //UE_LOG(LogSolaraqMovement, Warning, TEXT("Camera: Swinging due to major direction change. Dot: %.2f"), DotProduct);
                         CurrentCameraTargetOffset = UKismetMathLibrary::VInterpTo(CurrentCameraTargetOffset, ClampedIdealLookAhead, DeltaTime, CustomCameraLagSpeed);
                     }
                     else // Direction is still consistent.
@@ -175,7 +181,7 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
                             // REJOIN: Delay is over, start rejoining.
                              bIsInForcedRejoinState = true;
                              DirectionWhenForcedRejoinStarted = CurrentMovementDir;
-                             UE_LOG(LogSolaraqMovement, Warning, TEXT("Camera: Initiated forced rejoin. Dir: %s."), *DirectionWhenForcedRejoinStarted.ToString());
+                             //UE_LOG(LogSolaraqMovement, Warning, TEXT("Camera: Initiated forced rejoin. Dir: %s."), *DirectionWhenForcedRejoinStarted.ToString());
                         }
                         else
                         {
@@ -203,7 +209,7 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
         
         // Comprehensive logging for debugging camera behavior
         const FString LogMsg = FString::Printf(TEXT("PawnCam: Vel(%.0f, %.0f) | Offset(%.0f, %.0f) | Rejoin=%d | Time@Max=%.2f | MoveDir(%.1f, %.1f)"), GetVelocity().X, GetVelocity().Y, CurrentCameraTargetOffset.X, CurrentCameraTargetOffset.Y, bIsInForcedRejoinState, TimeAtMaxOffset, CurrentMovementDir.X, CurrentMovementDir.Y);
-        UE_LOG(LogSolaraqMovement, Warning, TEXT("%s"), *LogMsg);
+        //UE_LOG(LogSolaraqMovement, Warning, TEXT("%s"), *LogMsg);
         
         SpringArmComponent->TargetOffset = CurrentCameraTargetOffset;
         
