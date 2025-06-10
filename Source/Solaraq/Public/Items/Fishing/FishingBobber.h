@@ -19,13 +19,13 @@ public:
 	AFishingBobber(); // FIXED: Added missing constructor declaration
 
 	// --- Components ---
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components")
 	TObjectPtr<USphereComponent> CollisionComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components")
 	TObjectPtr<UStaticMeshComponent> MeshComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components")
 	TObjectPtr<UProjectileMovementComponent> ProjectileMovement;
 
 	// --- Public Functions ---

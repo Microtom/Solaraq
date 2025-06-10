@@ -3,10 +3,12 @@
 #include "Components/SphereComponent.h"             // FIXED: Added include
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h" // FIXED: Added include
+#include "Logging/SolaraqLogChannels.h"
 #include "Systems/FishingSubsystem.h" 
 
 AFishingBobber::AFishingBobber()
 {
+    UE_LOG(LogSolaraqFishing, Warning, TEXT("Bobber: Constructor called for a new instance."));
     PrimaryActorTick.bCanEverTick = true; // For buoyancy
 
     CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionComponent"));
@@ -46,6 +48,8 @@ void AFishingBobber::Tick(float DeltaTime)
 // FIXED: The signature now matches the header and the delegate
 void AFishingBobber::OnBobberHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
+    UE_LOG(LogSolaraqFishing, Warning, TEXT("Bobber (%s): OnBobberHit called. Hit actor: %s"), *GetName(), *OtherActor->GetName());
+    
     // Check if we hit a reasonably horizontal surface, which we'll assume is water.
     // Ensure we don't trigger this on vertical walls.
     if (Hit.ImpactNormal.Z > 0.7) // A value of 1.0 is perfectly flat. 0.7 allows for some slope.
@@ -62,6 +66,7 @@ void AFishingBobber::OnBobberHit(UPrimitiveComponent* HitComponent, AActor* Othe
 
 void AFishingBobber::StartFloating(float WaterSurfaceZ)
 {
+    UE_LOG(LogSolaraqFishing, Warning, TEXT("Bobber (%s): StartFloating called."), *GetName());
     bIsInWater = true;
     WaterLevel = WaterSurfaceZ;
     ProjectileMovement->Velocity *= 0.1f;

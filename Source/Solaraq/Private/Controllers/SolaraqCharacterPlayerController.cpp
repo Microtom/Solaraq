@@ -202,6 +202,7 @@ void ASolaraqCharacterPlayerController::HandleCharacterInteractInput()
 
 void ASolaraqCharacterPlayerController::HandlePrimaryUseStarted()
 {
+    UE_LOG(LogSolaraqFishing, Warning, TEXT("PC: HandlePrimaryUseStarted() - Input received."));
     if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
     {
         if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
@@ -213,6 +214,7 @@ void ASolaraqCharacterPlayerController::HandlePrimaryUseStarted()
 
 void ASolaraqCharacterPlayerController::HandlePrimaryUseCompleted()
 {
+    UE_LOG(LogSolaraqFishing, Warning, TEXT("PC: HandlePrimaryUseCompleted() - Input received."));
     if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
     {
         if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())

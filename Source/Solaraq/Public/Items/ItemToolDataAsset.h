@@ -7,6 +7,7 @@
 
 // Forward Declaration
 class AItemActorBase;
+class UAnimInstance;
 
 /**
  * Data Asset for items that can be equipped by the player and used as a tool (e.g., fishing rod, mining laser, scanner).
@@ -29,6 +30,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
 	TSubclassOf<AItemActorBase> EquippableActorClass;
 
+	// The Skeletal Mesh to display for this tool.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
+	TObjectPtr<USkeletalMesh> ToolSkeletalMesh;
+
+	// The Animation Blueprint class to use with the mesh.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
+	TSubclassOf<UAnimInstance> ToolAnimClass;
+	
 	// The name of the socket on the character's mesh to attach this tool to.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
 	FName AttachmentSocket = "hand_r_socket"; // Provide a sensible default

@@ -10,6 +10,7 @@
 #include "DrawDebugHelpers.h"
 #include "Components/EquipmentComponent.h"
 #include "Items/InventoryComponent.h"
+#include "Items/ItemToolDataAsset.h"
 #include "Logging/SolaraqLogChannels.h" // Your log channels
 
 ASolaraqCharacterPawn::ASolaraqCharacterPawn()
@@ -88,6 +89,17 @@ void ASolaraqCharacterPawn::BeginPlay()
         // or produce a double-lag effect. We primarily control its TargetOffset.
         // SpringArmComponent->bEnableCameraLag = false; // Let's test with it ON first.
         // The target offset itself will be lagged by our code.
+    }
+    if (InventoryComponent && EquipmentComponent)
+    {
+        // Load the Data Asset we created in the editor
+        UItemToolDataAsset* RodData = LoadObject<UItemToolDataAsset>(nullptr, TEXT("/Game/Items/Tools/FishingRods/BasicFishingRod/DA_BasicFishingRod.DA_BasicFishingRod"));
+        if (RodData)
+        {
+            InventoryComponent->AddItem(RodData, 1);
+            EquipmentComponent->EquipItem(RodData);
+            UE_LOG(LogTemp, Warning, TEXT("TEST: Gave player a fishing rod."));
+        }
     }
 }
 

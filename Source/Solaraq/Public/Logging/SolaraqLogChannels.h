@@ -19,7 +19,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqMarker, Log, All);	 // For planets and sta
 DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqTurret, Log, All);	 // For planets and stars
 DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqTransition, Log, All); // For transition between game maps
 DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqShield, Log, All); // For transition between game maps
-
+DECLARE_LOG_CATEGORY_EXTERN(LogSolaraqFishing, Log, All); // For transition between game maps
 
 // --- Blueprint Enum for Selecting Category ---
 UENUM(BlueprintType)
@@ -36,7 +36,8 @@ enum class ESolaraqLogCategory : uint8
 	Marker      UMETA(DisplayName = "Marker"),
 	Turret      UMETA(DisplayName = "Turret"),
 	Transition  UMETA(DisplayName = "Transition"),
-	Shield  UMETA(DisplayName = "Shield")
+	Shield  UMETA(DisplayName = "Shield"),
+	Fishing  UMETA(DisplayName = "Fishing")
 	// Add matching entries here if you add new categories above
 };
 

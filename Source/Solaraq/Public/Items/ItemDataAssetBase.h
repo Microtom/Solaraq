@@ -21,9 +21,8 @@ enum class EItemType : uint8
 
 /**
  * The BASE DataAsset for all items. It contains only properties shared by ALL items.
- * Do not create item instances directly from this; use a more specific child class.
  */
-UCLASS(BlueprintType, Abstract) // Note: Marked as Abstract!
+UCLASS(BlueprintType)
 class SOLARAQ_API UItemDataAssetBase : public UPrimaryDataAsset
 {
 	GENERATED_BODY()
