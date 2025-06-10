@@ -23,6 +23,9 @@ public:
 
     // --- Public Functions ---
 
+    // This function is called in the editor whenever a property is changed.
+    virtual void OnConstruction(const FTransform& Transform) override;
+    
     // Sets the pawn that is holding this item. Called by EquipmentComponent.
     virtual void SetOwningPawn(ASolaraqCharacterPawn* NewOwner);
     
@@ -40,12 +43,15 @@ public:
 
 
 protected:
+
+    virtual void OnItemDataChanged();
+    
     // The pawn that is currently holding this item actor
     UPROPERTY(BlueprintReadOnly, Category = "Solaraq|Item")
     TObjectPtr<ASolaraqCharacterPawn> OwningPawn;
 
     // The data asset that defines this item
-    UPROPERTY(BlueprintReadOnly, Category = "Solaraq|Item")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Item")
     TObjectPtr<UItemDataAssetBase> ItemData;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components")

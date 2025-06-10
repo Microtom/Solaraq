@@ -8,6 +8,14 @@ AItemActorBase::AItemActorBase()
 	RootComponent = DefaultSceneRoot;
 }
 
+void AItemActorBase::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// Call our helper function to apply the data
+	OnItemDataChanged();
+}
+
 void AItemActorBase::SetOwningPawn(ASolaraqCharacterPawn* NewOwner)
 {
 	OwningPawn = NewOwner;
@@ -43,4 +51,9 @@ void AItemActorBase::SecondaryUse()
 void AItemActorBase::SecondaryUse_Stop()
 {
 	// Base implementation does nothing.
+}
+
+void AItemActorBase::OnItemDataChanged()
+{
+	
 }

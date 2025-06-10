@@ -5,6 +5,7 @@
 #include "Pawns/SolaraqCharacterPawn.h"   // FIXED: Include the pawn for casting
 #include "GameFramework/Character.h"      // For attaching to the mesh
 #include "Items/ItemToolDataAsset.h"
+#include "Logging/SolaraqLogChannels.h"
 
 UEquipmentComponent::UEquipmentComponent()
 {
@@ -80,7 +81,12 @@ void UEquipmentComponent::HandlePrimaryUse()
 {
     if (CurrentEquippedActor)
     {
+        UE_LOG(LogSolaraqFishing, Warning, TEXT("EquipComp: HandlePrimaryUse() - Relaying to actor: %s"), *CurrentEquippedActor->GetName());
         CurrentEquippedActor->PrimaryUse();
+    }
+    else
+    {
+        UE_LOG(LogSolaraqFishing, Warning, TEXT("EquipComp: HandlePrimaryUse() - FAILED. No CurrentEquippedActor."));
     }
 }
 
@@ -88,7 +94,12 @@ void UEquipmentComponent::HandlePrimaryUse_Stop()
 {
     if (CurrentEquippedActor)
     {
+        UE_LOG(LogSolaraqFishing, Warning, TEXT("EquipComp: HandlePrimaryUse_Stop() - Relaying to actor: %s"), *CurrentEquippedActor->GetName());
         CurrentEquippedActor->PrimaryUse_Stop();
+    }
+    else
+    {
+        UE_LOG(LogSolaraqFishing, Warning, TEXT("EquipComp: HandlePrimaryUse_Stop() - FAILED. No CurrentEquippedActor."));
     }
 }
 

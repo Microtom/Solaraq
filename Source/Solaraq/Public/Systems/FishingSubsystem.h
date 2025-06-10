@@ -39,11 +39,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Fishing")
 	EFishingState GetCurrentState() const { return CurrentState; }
 
+	void CatchFish();
+
 protected:
-	void StartFishCheck();
+	void StartFishingSequence();
     
 	UFUNCTION()
 	void OnFishBite();
+
+	UFUNCTION()
+	void OnFishGotAway();
+
+	UPROPERTY(EditDefaultsOnly, Category = "Fishing|Data")
+	TObjectPtr<UDataTable> FishLootTable;
 
 private:
 	void ResetState();
@@ -61,6 +69,7 @@ private:
 	TObjectPtr<AFishingBobber> ActiveBobber;
     
 	FTimerHandle FishBiteTimerHandle;
+	FTimerHandle HookedTimerHandle;
 	float CastCharge = 0.f;
 
 	virtual void Tick(float DeltaTime) override;

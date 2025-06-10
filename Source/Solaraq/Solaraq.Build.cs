@@ -17,7 +17,8 @@ public class Solaraq : ModuleRules
 			"EnhancedInput", 
 			"GeometryCollectionEngine", 
 			"FieldSystemEngine",
-			"Niagara"
+			"Niagara",
+			"ProceduralMeshComponent",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
