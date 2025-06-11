@@ -167,40 +167,96 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
         // ETriggerEvent::Triggered works for both Tap (on release) and Hold (continuously).
         EnhancedInputComponentRef->BindAction(PointerMoveAction, ETriggerEvent::Triggered, this, &ASolaraqCharacterPlayerController::HandlePointerMove);
     }
+    if (ToggleFishingModeAction)
+    {
+        EnhancedInputComponentRef->BindAction(ToggleFishingModeAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleToggleFishingMode);
+    }
 }
 
 void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    // --- Camera Interpolation Logic ---
     if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
     {
         if (USpringArmComponent* SpringArm = CharPawn->GetSpringArmComponent())
         {
-            // 1. Interpolate Target Arm Length
+            bool bIsInFishingMode_ThisFrame = false;
+            if (UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>())
+            {
+                const EFishingState CurrentFishingState = FishingSS->GetCurrentState();
+                bIsInFishingMode_ThisFrame = (CurrentFishingState == EFishingState::ReadyToCast || CurrentFishingState == EFishingState::Casting);
+            }
+
+            // --- State Transition Logic ---
+
+            // Check if we just ENTERED fishing mode
+            if (bIsInFishingMode_ThisFrame && !bWasInFishingMode_LastFrame)
+            {
+                // This is the first frame of fishing. Save the current zoom.
+                PreFishingZoomLength = TargetZoomLength;
+                UE_LOG(LogTemp, Warning, TEXT("Entering Fishing Mode. Saved Zoom: %.f"), PreFishingZoomLength);
+            }
+            // Check if we just EXITED fishing mode
+            else if (!bIsInFishingMode_ThisFrame && bWasInFishingMode_LastFrame)
+            {
+                // This is the first frame after fishing. Restore the saved zoom.
+                TargetZoomLength = PreFishingZoomLength;
+                UE_LOG(LogTemp, Warning, TEXT("Exiting Fishing Mode. Restoring Zoom to: %.f"), TargetZoomLength);
+            }
+
+            // --- Continuous State Logic ---
+            
+            if (bIsInFishingMode_ThisFrame)
+            {
+                // While in fishing mode:
+                // 1. Set the target zoom to maximum.
+                TargetZoomLength = FishingModeZoomLength;
+
+                // 2. Set the target offset. This pushes the camera forward by the radius amount.
+                TargetCameraOffset = CharPawn->GetActorForwardVector() * CharPawn->FishingCameraRadius;
+            }
+            else
+            {
+                // While not in fishing mode, the camera should be centered.
+                TargetCameraOffset = FVector::ZeroVector;
+            }
+
+            // --- Interpolation (This part is now always correct) ---
+
+            // Interpolate Target Arm Length (Zoom)
             SpringArm->TargetArmLength = FMath::FInterpTo(SpringArm->TargetArmLength, TargetZoomLength, DeltaTime, ZoomInterpSpeed);
 
-            // 2. Calculate and Interpolate Rotation based on the Curve
+            // Interpolate Target Offset (Position)
+            SpringArm->TargetOffset = FMath::VInterpTo(SpringArm->TargetOffset, TargetCameraOffset, DeltaTime, CameraOffsetInterpSpeed);
+
+            // Interpolate Rotation based on the Curve
             if (CameraZoomCurve)
             {
-                // Use the *current* interpolated arm length to get the desired Pitch from the curve
                 const float TargetPitch = CameraZoomCurve->GetFloatValue(SpringArm->TargetArmLength);
-                
                 const FRotator CurrentRotation = SpringArm->GetRelativeRotation();
                 const FRotator TargetRotation = FRotator(TargetPitch * -1.f, CurrentRotation.Yaw, CurrentRotation.Roll);
-
-                // Interpolate towards the target rotation
                 const FRotator InterpolatedRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, RotationInterpSpeed);
-                
                 SpringArm->SetRelativeRotation(InterpolatedRotation);
             }
+
+            // Finally, update our state tracker for the next frame.
+            bWasInFishingMode_LastFrame = bIsInFishingMode_ThisFrame;
         }
     }
 }
 
 void ASolaraqCharacterPlayerController::HandleCharacterMoveInput(const FInputActionValue& Value)
 {
+    if (UFishingSubsystem* FishingSubsystem = GetWorld()->GetSubsystem<UFishingSubsystem>())
+    {
+        if (FishingSubsystem->GetCurrentState() != EFishingState::Idle)
+        {
+            UE_LOG(LogSolaraqFishing, Log, TEXT("PC: Movement input detected, cancelling fishing."));
+            FishingSubsystem->ResetState();
+        }
+    }
+    
     StopMovement();
     
     ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
@@ -314,6 +370,15 @@ void ASolaraqCharacterPlayerController::HandleSecondaryUseCompleted()
         {
             EquipComp->HandleSecondaryUse_Stop(); // Pass the command to the pawn's component
         }
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandleToggleFishingMode()
+{
+    if (UFishingSubsystem* FishingSubsystem = GetWorld()->GetSubsystem<UFishingSubsystem>())
+    {
+        // We just pass the request to the subsystem, it will handle the logic.
+        FishingSubsystem->RequestToggleFishingMode(GetControlledCharacter());
     }
 }
 

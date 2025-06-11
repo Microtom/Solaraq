@@ -407,17 +407,23 @@ void AItemActor_FishingRod::PrimaryUse_Stop()
     }
 }
 
-AFishingBobber* AItemActor_FishingRod::SpawnAndCastBobber(float Charge)
+AFishingBobber* AItemActor_FishingRod::SpawnAndCastBobber(const FVector& CastDirection, float Charge)
 {
-    // This function is called by the subsystem to initiate the cast.
-    // Instead of spawning a projectile, we just start extending the verlet rope.
-    // We'll ignore 'Charge' for now for simplicity.
     UE_LOG(LogSolaraqFishing, Log, TEXT("Rod (%s): 'SpawnAndCastBobber' called. Starting to extend line."), *GetName());
+
+    const float CastSpeed = FMath::Lerp(500.f, 2000.f, Charge);
+    const FVector InitialVelocity = CastDirection * CastSpeed;
+
+    for (FVerletParticle& Particle : RopeParticles)
+    {
+        // Use Verlet integration to impart a velocity: V = (Pos - OldPos)
+        // So, OldPos = Pos - V * DeltaT
+        Particle.OldPosition = Particle.Position - (InitialVelocity * TimeStep);
+    }
+
     bIsCasting = true;
     bIsReeling = false;
 
-    // We return 'nullptr' because we are not spawning a separate bobber actor.
-    // The subsystem will be updated to handle this.
     return nullptr;
 }
 
@@ -434,6 +440,14 @@ void AItemActor_FishingRod::NotifyFishBite()
     if (FishBiteSound)
     {
         UGameplayStatics::PlaySoundAtLocation(this, FishBiteSound, GetActorLocation());
+    }
+
+    if (RopeParticles.Num() > 0)
+    {
+        // Apply a sharp downward impulse to the last particle (the bobber)
+        // We do this by directly modifying its OldPosition to simulate instant velocity.
+        FVerletParticle& LastParticle = RopeParticles.Last();
+        LastParticle.OldPosition.Z += 25.0f; // This creates a downward velocity on the next simulation step.
     }
 }
 
