@@ -7,6 +7,7 @@
 #include "Items/Fishing/ItemActor_FishingRod.h" 
 #include "Items/Fishing/FishingBobber.h"  
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Logging/SolaraqLogChannels.h"
 
 void UFishingSubsystem::Tick(float DeltaTime)
@@ -25,6 +26,16 @@ void UFishingSubsystem::Tick(float DeltaTime)
             CatchFish();
         }
     }
+
+    if (CurrentState != EFishingState::Idle && CurrentFisher)
+    {
+        // Use a small threshold to avoid cancelling due to tiny animation drifts
+        if (CurrentFisher->GetVelocity().SizeSquared() > 1.0f)
+        {
+            UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Pawn is moving, resetting fishing state."));
+            ResetState();
+        }
+    }
 }
 
 void UFishingSubsystem::RequestPrimaryAction(ASolaraqCharacterPawn* Caster, AItemActor_FishingRod* Rod)
@@ -32,6 +43,14 @@ void UFishingSubsystem::RequestPrimaryAction(ASolaraqCharacterPawn* Caster, AIte
     UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: RequestPrimaryAction. Current State: %s"), *UEnum::GetValueAsString(CurrentState));
     switch (CurrentState)
     {
+    case EFishingState::ReadyToCast: // CHANGED: We now start casting from ReadyToCast
+        // The request is to start charging the cast
+            CurrentState = EFishingState::Casting;
+        CurrentFisher = Caster;
+        ActiveRod = Rod;
+        CastCharge = 0.f;
+        // You could also notify the player's anim blueprint to play a "charge" animation here.
+        break;
     case EFishingState::Idle:
         // The request is to start charging the cast
             CurrentState = EFishingState::Casting;
@@ -66,9 +85,9 @@ void UFishingSubsystem::RequestPrimaryAction_Stop(ASolaraqCharacterPawn* Caster,
         return; // Action is only valid if we are currently casting for this player
     }
 
-    // Since the rod doesn't spawn a separate actor, we don't need to check its return value.
-    // We just tell it to cast and then we manage our own state.
-    Rod->SpawnAndCastBobber(CastCharge);
+    // NEW: Get the aim direction from the pawn and pass it to the rod
+    const FVector AimDirection = Caster->GetAimDirection();
+    Rod->SpawnAndCastBobber(AimDirection, CastCharge);
     
     CurrentState = EFishingState::Fishing;
     UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Cast released. New state: Fishing. Waiting for a bite."));
@@ -126,6 +145,33 @@ void UFishingSubsystem::CatchFish()
     ResetState();
 }
 
+void UFishingSubsystem::RequestToggleFishingMode(ASolaraqCharacterPawn* Requester)
+{
+    // TODO Must ensure that a fishing rod is equipped. Possibly message the player.
+    
+    if (!Requester) return;
+
+    if (CurrentState == EFishingState::Idle)
+    {
+        const FVector AimDirection = Requester->GetAimDirection();
+        const FRotator TargetRotation = UKismetMathLibrary::MakeRotFromX(AimDirection);
+        Requester->SetActorRotation(TargetRotation);
+        
+        // Enter fishing mode
+        CurrentState = EFishingState::ReadyToCast;
+        CurrentFisher = Requester;
+        //ActiveRod = Requester->GetEquipmentComponent() ? Cast<AItemActor_FishingRod>(Requester->GetEquipmentComponent()->GetEquippedItemActor()) : nullptr;
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Entered ReadyToCast state."));
+        // We will add the camera transition call here later.
+    }
+    else if (CurrentState == EFishingState::ReadyToCast)
+    {
+        // Exit fishing mode, resetting back to idle
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Exited ReadyToCast state."));
+        ResetState();
+    }
+}
+
 void UFishingSubsystem::StartFishingSequence()
 {
     float TimeToBite = FMath::RandRange(5.0f, 15.0f);
@@ -137,10 +183,6 @@ void UFishingSubsystem::OnFishBite()
     if (CurrentState == EFishingState::Fishing)
     {
         CurrentState = EFishingState::FishHooked;
-        if (ActiveBobber)
-        {
-            ActiveBobber->Jiggle();
-        }
         if (ActiveRod)
         {
             ActiveRod->NotifyFishBite();

@@ -55,6 +55,9 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
     TObjectPtr<UInputAction> CameraZoomAction; // For the mouse wheel
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
+    TObjectPtr<UInputAction> ToggleFishingModeAction;
     
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
     TObjectPtr<UCurveFloat> CameraZoomCurve;
@@ -66,6 +69,9 @@ protected:
     float MaxZoomLength = 2000.f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    float FishingModeZoomLength = 1700.f;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
     float ZoomStepAmount = 100.f; // How much each mouse wheel tick changes the target zoom
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
@@ -74,7 +80,14 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
     float RotationInterpSpeed = 5.f; // How smoothly the camera rotates to match the zoom
 
+    FVector TargetCameraOffset;
+    
+    UPROPERTY(EditAnywhere, Category = "Solaraq|Camera")
+    float CameraOffsetInterpSpeed = 3.f;
 
+    float PreFishingZoomLength;
+    bool bWasInFishingMode_LastFrame = false;
+    
     // --- Input Handling Functions (Character & Shared Handlers) ---
     void HandlePointerMove(const FInputActionValue& Value);
     void HandleCharacterInteractInput(); // Specific handler for character interaction
@@ -82,6 +95,7 @@ protected:
     void HandlePrimaryUseCompleted(); // For 'Release' triggers
     void HandleSecondaryUseStarted();
     void HandleSecondaryUseCompleted();
+    void HandleToggleFishingMode();
     void HandleCharacterMoveInput(const FInputActionValue& Value);
     void HandleCameraZoom(const FInputActionValue& Value);
     void MoveToDestination(const FVector& Destination);

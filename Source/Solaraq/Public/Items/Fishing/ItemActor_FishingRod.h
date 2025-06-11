@@ -39,7 +39,7 @@ public:
     //~ End AItemActorBase Interface
 
     // --- Public API ---
-    AFishingBobber* SpawnAndCastBobber(float Charge);
+    AFishingBobber* SpawnAndCastBobber(const FVector& CastDirection, float Charge);
     void StartReeling();
     void NotifyFishBite();
     void NotifyReset();

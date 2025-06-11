@@ -15,6 +15,7 @@ enum class EFishingState : uint8
 {
 	Idle,
 	Casting,
+	ReadyToCast,
 	Fishing,
 	FishHooked,
 	Reeling
@@ -39,7 +40,7 @@ public:
 	EFishingState GetCurrentState() const { return CurrentState; }
 
 	void CatchFish();
-
+	void RequestToggleFishingMode(ASolaraqCharacterPawn* Requester);
 	void ResetState();
 
 protected:

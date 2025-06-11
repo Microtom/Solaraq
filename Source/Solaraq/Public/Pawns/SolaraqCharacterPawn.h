@@ -30,6 +30,12 @@ public:
 
 	FORCEINLINE class UInventoryComponent* GetInventoryComponent() const { return InventoryComponent; }
 	FORCEINLINE class UEquipmentComponent* GetEquipmentComponent() const { return EquipmentComponent; }
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fishing")
+	float FishingCameraRadius = 800.f;
+	
+	FVector GetAimDirection() const;
+
 	
 protected:
 	virtual void BeginPlay() override;
@@ -40,6 +46,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<UCameraComponent> CameraComponent;
 
+	
+
+	
     // --- Custom Camera Control ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag")
     bool bUseCustomCameraLag = true;
