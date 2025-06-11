@@ -6,13 +6,21 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputAction.h"
+#include "NavigationSystem.h"
+#include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Core/SolaraqGameInstance.h" // For level transition
+#include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h" // For OpenLevel
 #include "Logging/SolaraqLogChannels.h"
+#include "Systems/FishingSubsystem.h"
 
 ASolaraqCharacterPlayerController::ASolaraqCharacterPlayerController()
 {
-    // Constructor
+    bShowMouseCursor = true;
+    bEnableClickEvents = true;
+    bEnableMouseOverEvents = true;
+    DefaultMouseCursor = EMouseCursor::Default;
+    CachedDestination = FVector::ZeroVector;
 }
 
 ASolaraqCharacterPawn* ASolaraqCharacterPlayerController::GetControlledCharacter() const
@@ -44,6 +52,12 @@ void ASolaraqCharacterPlayerController::ApplyCharacterInputMappingContext()
 void ASolaraqCharacterPlayerController::BeginPlay()
 {
     Super::BeginPlay();
+
+    FInputModeGameAndUI InputModeData;
+    InputModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    InputModeData.SetHideCursorDuringCapture(false);
+    SetInputMode(InputModeData);
+    
     if (GetPawn()) // Only apply if we already possess a pawn
     {
         ApplyCharacterInputMappingContext();
@@ -56,9 +70,16 @@ void ASolaraqCharacterPlayerController::OnPossess(APawn* InPawn)
 
     ASolaraqCharacterPawn* PossessedChar = Cast<ASolaraqCharacterPawn>(InPawn);
     FString AuthorityPrefix = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
-
+    
+    
     if (PossessedChar)
     {
+        if (USpringArmComponent* SpringArm = PossessedChar->GetSpringArmComponent())
+        {
+            // Sync our target length with the pawn's default to prevent a "snap" on possess.
+            TargetZoomLength = SpringArm->TargetArmLength;
+        }
+        
         UE_LOG(LogSolaraqMovement, Warning, TEXT("%s ASolaraqCharacterPlayerController (%s): OnPossess - Possessing CHARACTER: %s"),
             *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(PossessedChar));
         ApplyCharacterInputMappingContext();
@@ -136,21 +157,71 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
         EnhancedInputComponentRef->BindAction(SecondaryUseAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleSecondaryUseStarted);
         EnhancedInputComponentRef->BindAction(SecondaryUseAction, ETriggerEvent::Completed, this, &ASolaraqCharacterPlayerController::HandleSecondaryUseCompleted);
     }
+    if (CameraZoomAction)
+    {
+        EnhancedInputComponentRef->BindAction(CameraZoomAction, ETriggerEvent::Triggered, this, &ASolaraqCharacterPlayerController::HandleCameraZoom);
+    }
+    if (PointerMoveAction)
+    {
+        // We bind ONE function. The triggers in the IMC will determine WHEN it gets called.
+        // ETriggerEvent::Triggered works for both Tap (on release) and Hold (continuously).
+        EnhancedInputComponentRef->BindAction(PointerMoveAction, ETriggerEvent::Triggered, this, &ASolaraqCharacterPlayerController::HandlePointerMove);
+    }
 }
 
 void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    // Character-specific tick logic, if any (e.g., managing a character-specific UI element)
+    
+    // --- Camera Interpolation Logic ---
+    if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
+    {
+        if (USpringArmComponent* SpringArm = CharPawn->GetSpringArmComponent())
+        {
+            // 1. Interpolate Target Arm Length
+            SpringArm->TargetArmLength = FMath::FInterpTo(SpringArm->TargetArmLength, TargetZoomLength, DeltaTime, ZoomInterpSpeed);
+
+            // 2. Calculate and Interpolate Rotation based on the Curve
+            if (CameraZoomCurve)
+            {
+                // Use the *current* interpolated arm length to get the desired Pitch from the curve
+                const float TargetPitch = CameraZoomCurve->GetFloatValue(SpringArm->TargetArmLength);
+                
+                const FRotator CurrentRotation = SpringArm->GetRelativeRotation();
+                const FRotator TargetRotation = FRotator(TargetPitch * -1.f, CurrentRotation.Yaw, CurrentRotation.Roll);
+
+                // Interpolate towards the target rotation
+                const FRotator InterpolatedRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, RotationInterpSpeed);
+                
+                SpringArm->SetRelativeRotation(InterpolatedRotation);
+            }
+        }
+    }
 }
 
 void ASolaraqCharacterPlayerController::HandleCharacterMoveInput(const FInputActionValue& Value)
 {
+    StopMovement();
+    
     ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
     if (CharPawn)
     {
         const FVector2D MovementVector = Value.Get<FVector2D>();
         CharPawn->HandleMoveInput(MovementVector);
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandlePointerMove(const FInputActionValue& Value)
+{
+    FHitResult Hit;
+    if (GetHitResultUnderCursor(ECC_Visibility, false, Hit))
+    {
+        if (Hit.bBlockingHit)
+        {
+            // This function now handles both taps and holds seamlessly.
+            // It simply moves to wherever the cursor is when a valid trigger fires.
+            MoveToDestination(Hit.Location);
+        }
     }
 }
 
@@ -242,6 +313,40 @@ void ASolaraqCharacterPlayerController::HandleSecondaryUseCompleted()
         if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
         {
             EquipComp->HandleSecondaryUse_Stop(); // Pass the command to the pawn's component
+        }
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandleCameraZoom(const FInputActionValue& Value)
+{
+    const float ZoomAxisValue = Value.Get<float>();
+    if (FMath::IsNearlyZero(ZoomAxisValue))
+    {
+        return; // No input
+    }
+
+    // We no longer directly set the spring arm length.
+    // We just update our target, and Tick() will handle the interpolation.
+    TargetZoomLength -= ZoomAxisValue * ZoomStepAmount;
+    TargetZoomLength = FMath::Clamp(TargetZoomLength, MinZoomLength, MaxZoomLength);
+}
+
+void ASolaraqCharacterPlayerController::MoveToDestination(const FVector& Destination)
+{
+    if (APawn* ControlledPawn = GetPawn())
+    {
+        // Stop any active fishing actions if we issue a move command
+        if(UFishingSubsystem* FishingSubsystem = GetWorld()->GetSubsystem<UFishingSubsystem>())
+        {
+            if(FishingSubsystem->GetCurrentState() != EFishingState::Idle)
+            {
+                FishingSubsystem->ResetState();
+            }
+        }
+
+        if (UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+        {
+            UAIBlueprintHelperLibrary::SimpleMoveToLocation(this, Destination);
         }
     }
 }

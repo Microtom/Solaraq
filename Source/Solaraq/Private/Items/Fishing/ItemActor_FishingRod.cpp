@@ -375,28 +375,56 @@ void AItemActor_FishingRod::DrawRope()
 void AItemActor_FishingRod::OnUnequip()
 {
     Super::OnUnequip();
+
+    if (UWorld* World = GetWorld())
+    {
+        if (UFishingSubsystem* FishingSubsystem = World->GetSubsystem<UFishingSubsystem>())
+        {
+            FishingSubsystem->OnToolUnequipped(this);
+        }
+    }
 }
 
 void AItemActor_FishingRod::PrimaryUse()
 {
-    bIsCasting = true;
-    bIsReeling = false;
+    if (UWorld* World = GetWorld())
+    {
+        if (UFishingSubsystem* FishingSubsystem = World->GetSubsystem<UFishingSubsystem>())
+        {
+            FishingSubsystem->RequestPrimaryAction(OwningPawn, this);
+        }
+    }
 }
 
 void AItemActor_FishingRod::PrimaryUse_Stop()
 {
-    bIsCasting = false;
+    if (UWorld* World = GetWorld())
+    {
+        if (UFishingSubsystem* FishingSubsystem = World->GetSubsystem<UFishingSubsystem>())
+        {
+            FishingSubsystem->RequestPrimaryAction_Stop(OwningPawn, this);
+        }
+    }
 }
 
 AFishingBobber* AItemActor_FishingRod::SpawnAndCastBobber(float Charge)
 {
-    UE_LOG(LogSolaraqFishing, Warning, TEXT("Rod (%s): SpawnAndCastBobber() called (stub)."), *GetName());
+    // This function is called by the subsystem to initiate the cast.
+    // Instead of spawning a projectile, we just start extending the verlet rope.
+    // We'll ignore 'Charge' for now for simplicity.
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Rod (%s): 'SpawnAndCastBobber' called. Starting to extend line."), *GetName());
+    bIsCasting = true;
+    bIsReeling = false;
+
+    // We return 'nullptr' because we are not spawning a separate bobber actor.
+    // The subsystem will be updated to handle this.
     return nullptr;
 }
 
 void AItemActor_FishingRod::StartReeling()
 {
-    UE_LOG(LogSolaraqFishing, Warning, TEXT("Rod (%s): StartReeling() called (stub)."), *GetName());
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Rod (%s): StartReeling() called."), *GetName());
+    bIsCasting = false;
     bIsReeling = true;
 }
 
@@ -411,9 +439,13 @@ void AItemActor_FishingRod::NotifyFishBite()
 
 void AItemActor_FishingRod::NotifyReset()
 {
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Rod (%s): NotifyReset() called."), *GetName());
     bIsCasting = false;
     bIsReeling = false;
-    InitializeRope();
-    if(CurrentBobber) CurrentBobber->Destroy();
-    CurrentBobber = nullptr;
+    InitializeRope(); // Reset the rope to its initial hanging state.
+    if(CurrentBobber)
+    {
+        CurrentBobber->Destroy();
+        CurrentBobber = nullptr;
+    }
 }

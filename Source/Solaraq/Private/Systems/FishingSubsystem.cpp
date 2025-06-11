@@ -15,68 +15,66 @@ void UFishingSubsystem::Tick(float DeltaTime)
     {
         CastCharge = FMath::Clamp(CastCharge + DeltaTime, 0.f, 1.f);
     }
+    
+    // Check if reeling is finished
+    if (CurrentState == EFishingState::Reeling && ActiveRod)
+    {
+        // A simple condition to check if the fish is "caught"
+        if (ActiveRod->CurrentRopeLength <= ActiveRod->RopeSegmentLength * 2.0f)
+        {
+            CatchFish();
+        }
+    }
 }
 
 void UFishingSubsystem::RequestPrimaryAction(ASolaraqCharacterPawn* Caster, AItemActor_FishingRod* Rod)
 {
-    UE_LOG(LogSolaraqFishing, Warning, TEXT("Subsystem: RequestPrimaryAction. Current State: %s"), *UEnum::GetValueAsString(CurrentState));
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: RequestPrimaryAction. Current State: %s"), *UEnum::GetValueAsString(CurrentState));
     switch (CurrentState)
     {
     case EFishingState::Idle:
-        // The request is to start casting
+        // The request is to start charging the cast
             CurrentState = EFishingState::Casting;
         CurrentFisher = Caster;
         ActiveRod = Rod;
         CastCharge = 0.f;
+        // You could also notify the player's anim blueprint to play a "charge" animation here.
         break;
     case EFishingState::Fishing:
     case EFishingState::FishHooked:
         // The request is to start reeling. THIS IS THE SUCCESS CASE!
-        GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle); // <-- ADD THIS LINE
+        GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle); // Stop the "fish got away" timer!
         
         CurrentState = EFishingState::Reeling;
-        GetWorld()->GetTimerManager().ClearTimer(FishBiteTimerHandle); // This is already here, which is fine.
+        GetWorld()->GetTimerManager().ClearTimer(FishBiteTimerHandle); // Stop waiting for a new bite.
         if (ActiveRod)
         {
             ActiveRod->StartReeling();
         }
         break;
     default:
-        // Ignore request in other states (like Reeling or Casting)
+        // Ignore request in other states (like Reeling or already Casting)
             break;
     }
 }
 
 void UFishingSubsystem::RequestPrimaryAction_Stop(ASolaraqCharacterPawn* Caster, AItemActor_FishingRod* Rod)
 {
-    UE_LOG(LogSolaraqFishing, Warning, TEXT("Subsystem: RequestPrimaryAction_Stop. Current State: %s"), *UEnum::GetValueAsString(CurrentState));
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: RequestPrimaryAction_Stop. Current State: %s"), *UEnum::GetValueAsString(CurrentState));
     if (CurrentState != EFishingState::Casting || Caster != CurrentFisher)
     {
-        UE_LOG(LogSolaraqFishing, Warning, TEXT("Subsystem: ... Ignored due to wrong state or caster."));
         return; // Action is only valid if we are currently casting for this player
     }
 
-    UE_LOG(LogSolaraqFishing, Warning, TEXT("Subsystem: ... Calling SpawnAndCastBobber on Rod (%s)."), *Rod->GetName());
+    // Since the rod doesn't spawn a separate actor, we don't need to check its return value.
+    // We just tell it to cast and then we manage our own state.
     Rod->SpawnAndCastBobber(CastCharge);
-    if (ActiveBobber)
-    {
-        CurrentState = EFishingState::Fishing;
-        UE_LOG(LogSolaraqFishing, Warning, TEXT("Subsystem: ... Bobber is valid. New state: Fishing."));
-    }
-    else
-    {
-        UE_LOG(LogSolaraqFishing, Warning, TEXT("Subsystem: ... Bobber is NULL. Resetting state."));
-        ResetState();
-    }
-}
+    
+    CurrentState = EFishingState::Fishing;
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Cast released. New state: Fishing. Waiting for a bite."));
 
-void UFishingSubsystem::OnBobberLanded(AFishingBobber* Bobber, float WaterSurfaceZ)
-{
-    if (CurrentState == EFishingState::Fishing && Bobber == ActiveBobber)
-    {
-        Bobber->StartFloating(WaterSurfaceZ);
-        StartFishingSequence();
-    }
+    // Immediately start the sequence to wait for a fish bite.
+    StartFishingSequence();
 }
 
 void UFishingSubsystem::OnToolUnequipped(AItemActor_FishingRod* Rod)
@@ -171,10 +169,6 @@ void UFishingSubsystem::OnFishGotAway()
 
 void UFishingSubsystem::ResetState()
 {
-    if (ActiveBobber)
-    {
-        ActiveBobber->Destroy();
-    }
     if (ActiveRod)
     {
         ActiveRod->NotifyReset();
@@ -183,6 +177,8 @@ void UFishingSubsystem::ResetState()
     CurrentState = EFishingState::Idle;
     CurrentFisher = nullptr;
     ActiveRod = nullptr;
-    ActiveBobber = nullptr;
+    // ActiveBobber = nullptr; // No longer needed
+    
     GetWorld()->GetTimerManager().ClearTimer(FishBiteTimerHandle);
+    GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle); 
 }

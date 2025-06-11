@@ -32,7 +32,6 @@ public:
 	void RequestPrimaryAction_Stop(ASolaraqCharacterPawn* Caster, AItemActor_FishingRod* Rod);
 
 	// --- Callbacks from World Objects ---
-	void OnBobberLanded(AFishingBobber* Bobber, float WaterSurfaceZ);
 	void OnToolUnequipped(AItemActor_FishingRod* Rod);
     
 	// --- Getters ---
@@ -40,6 +39,8 @@ public:
 	EFishingState GetCurrentState() const { return CurrentState; }
 
 	void CatchFish();
+
+	void ResetState();
 
 protected:
 	void StartFishingSequence();
@@ -54,7 +55,7 @@ protected:
 	TObjectPtr<UDataTable> FishLootTable;
 
 private:
-	void ResetState();
+	
 
 	UPROPERTY()
 	EFishingState CurrentState = EFishingState::Idle;

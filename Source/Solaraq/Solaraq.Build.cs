@@ -19,6 +19,8 @@ public class Solaraq : ModuleRules
 			"FieldSystemEngine",
 			"Niagara",
 			"ProceduralMeshComponent",
+			"NavigationSystem",
+			"AIModule"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
