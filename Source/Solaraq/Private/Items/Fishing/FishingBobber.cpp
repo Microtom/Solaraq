@@ -56,7 +56,7 @@ void AFishingBobber::OnBobberHit(UPrimitiveComponent* HitComponent, AActor* Othe
     {
         if (UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>())
         {
-            FishingSS->OnBobberLanded(this, Hit.ImpactPoint.Z);
+            //FishingSS->OnBobberLanded(this, Hit.ImpactPoint.Z);
             
             // To prevent this from firing multiple times, we can unbind it after the first valid hit.
             CollisionComponent->OnComponentHit.RemoveDynamic(this, &AFishingBobber::OnBobberHit);

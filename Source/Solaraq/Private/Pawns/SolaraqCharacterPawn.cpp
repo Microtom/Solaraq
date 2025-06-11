@@ -254,6 +254,7 @@ void ASolaraqCharacterPawn::HandleMoveInput(const FVector2D& MovementVector)
         AddMovementInput(ForwardDirection, MovementVector.Y);
         AddMovementInput(RightDirection, MovementVector.X);
     }
+    
 }
 
 void ASolaraqCharacterPawn::HandleLookInput(const FVector2D& LookAxisVector)

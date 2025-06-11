@@ -48,27 +48,52 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
     TObjectPtr<UInputAction> SecondaryUseAction;
+
+    // We now use a single action for both tapping and holding the pointer.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
+    TObjectPtr<UInputAction> PointerMoveAction;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
+    TObjectPtr<UInputAction> CameraZoomAction; // For the mouse wheel
     
-    // Add other character actions here (e.g., Jump, Look, Crouch)
-    // UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
-    // TObjectPtr<UInputAction> CharacterLookAction;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    TObjectPtr<UCurveFloat> CameraZoomCurve;
 
-    // UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
-    // TObjectPtr<UInputAction> CharacterJumpAction;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    float MinZoomLength = 300.f;
 
-    // InteractAction is in Base, will be bound here.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    float MaxZoomLength = 2000.f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    float ZoomStepAmount = 100.f; // How much each mouse wheel tick changes the target zoom
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    float ZoomInterpSpeed = 5.f; // How smoothly the camera zooms in/out
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    float RotationInterpSpeed = 5.f; // How smoothly the camera rotates to match the zoom
+
 
     // --- Input Handling Functions (Character & Shared Handlers) ---
-    void HandleCharacterMoveInput(const FInputActionValue& Value);
-    // void HandleCharacterLookInput(const FInputActionValue& Value);
-    // void HandleCharacterJumpInput();
+    void HandlePointerMove(const FInputActionValue& Value);
     void HandleCharacterInteractInput(); // Specific handler for character interaction
     void HandlePrimaryUseStarted();
     void HandlePrimaryUseCompleted(); // For 'Release' triggers
     void HandleSecondaryUseStarted();
     void HandleSecondaryUseCompleted();
-
+    void HandleCharacterMoveInput(const FInputActionValue& Value);
+    void HandleCameraZoom(const FInputActionValue& Value);
+    void MoveToDestination(const FVector& Destination);
+    
 private:
     // No longer need specific PossessedCharacterPawn, GetControlledCharacter() will cast GetPawn()
     void ApplyCharacterInputMappingContext();
+
+    FVector CachedDestination;
+    float LastMoveRequestTime = 0.f;
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Input|Character")
+    float MoveRequestDebounceTime = 0.2f;
+
+    float TargetZoomLength; 
 };

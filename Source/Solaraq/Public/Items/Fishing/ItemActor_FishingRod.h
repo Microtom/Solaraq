@@ -44,6 +44,15 @@ public:
     void NotifyFishBite();
     void NotifyReset();
 
+    // The length the rope is trying to reach
+    float TargetRopeLength = 0.0f;
+
+    // The current physical length of the rope simulation
+    float CurrentRopeLength = 0.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Rope Simulation")
+    float RopeSegmentLength = 10.0f;
+    
 protected:
     // --- Components ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components")
@@ -85,8 +94,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Rope Simulation")
     int32 RopeSolverIterations = 8;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Rope Simulation")
-    float RopeSegmentLength = 10.0f;
+    
     
     UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Rope Simulation")
     float InitialRopeLength = 50.0f;
@@ -129,11 +137,7 @@ private:
     UPROPERTY()
     TObjectPtr<AFishingBobber> CurrentBobber;
     
-    // The length the rope is trying to reach
-    float TargetRopeLength = 0.0f;
-
-    // The current physical length of the rope simulation
-    float CurrentRopeLength = 0.0f;
+    
 
     // Input state flags
     bool bIsCasting = false;
