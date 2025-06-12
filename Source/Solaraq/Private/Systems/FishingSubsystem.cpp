@@ -38,38 +38,60 @@ void UFishingSubsystem::Tick(float DeltaTime)
     }
 }
 
+void UFishingSubsystem::EnterFishingStance(ASolaraqCharacterPawn* Requester)
+{
+    if (!Requester) return;
+
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Entering fishing stance for %s."), *Requester->GetName());
+
+    // This is the logic from the old RequestToggleFishingMode
+    const FVector AimDirection = Requester->GetAimDirection();
+    const FRotator TargetRotation = UKismetMathLibrary::MakeRotFromX(AimDirection);
+    Requester->StartSmoothTurn(TargetRotation);
+
+    CurrentState = EFishingState::ReadyToCast;
+    CurrentFisher = Requester;
+}
+
 void UFishingSubsystem::RequestPrimaryAction(ASolaraqCharacterPawn* Caster, AItemActor_FishingRod* Rod)
 {
     UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: RequestPrimaryAction. Current State: %s"), *UEnum::GetValueAsString(CurrentState));
     switch (CurrentState)
     {
     case EFishingState::ReadyToCast:
-    case EFishingState::Idle:
-        // This is the "start charging cast" logic. It remains unchanged.
-        CurrentState = EFishingState::Casting;
+        // Same as before
+            CurrentState = EFishingState::Casting;
         CurrentFisher = Caster;
         ActiveRod = Rod;
         CastCharge = 0.f;
         break;
 
-        // MODIFIED: This case now handles starting the reel for both a hooked fish AND an empty line.
+        // --- THIS IS THE KEY CHANGE ---
+    case EFishingState::Idle:
+        // If we are idle, first enter the stance...
+            EnterFishingStance(Caster);
+        // ...and then immediately transition to casting.
+        CurrentState = EFishingState::Casting;
+        ActiveRod = Rod;
+        CastCharge = 0.f;
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Primary Action from Idle triggered stance and casting."));
+        break;
+        // ----------------------------
+
     case EFishingState::Fishing:
     case EFishingState::FishHooked:
-        GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle); // Stop the "fish got away" timer if it was running.
-        GetWorld()->GetTimerManager().ClearTimer(FishBiteTimerHandle); // Stop waiting for a new bite.
-
+        // Reeling logic is unchanged
+        GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle);
         CurrentState = EFishingState::Reeling;
-        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Primary action in Fishing/Hooked state. Transitioning to Reeling."));
-
+        GetWorld()->GetTimerManager().ClearTimer(FishBiteTimerHandle);
         if (ActiveRod)
         {
             ActiveRod->StartReeling();
         }
         break;
-        
+
     default:
-        // Ignore request in other states (like Reeling or already Casting)
-            break;
+        break;
     }
 }
 
@@ -167,30 +189,12 @@ void UFishingSubsystem::RequestToggleFishingMode(ASolaraqCharacterPawn* Requeste
 
     if (CurrentState == EFishingState::Idle)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Subsystem: Requesting to enter fishing mode."));
-        
-        // --- NEW: USE THE PAWN'S SMOOTH TURN ---
-        const FVector AimDirection = Requester->GetAimDirection();
-        const FRotator TargetRotation = UKismetMathLibrary::MakeRotFromX(AimDirection);
-
-        UE_LOG(LogTemp, Warning, TEXT("Subsystem: Calculated Aim Direction: %s, resulting in Target Yaw: %.2f"), *AimDirection.ToString(), TargetRotation.Yaw);
-        
-        UE_LOG(LogTemp, Warning, TEXT("Subsystem: Calling StartSmoothTurn on Pawn."));
-        Requester->StartSmoothTurn(TargetRotation);
-        // ---
-
-        // Enter fishing mode
-        CurrentState = EFishingState::ReadyToCast;
-        CurrentFisher = Requester;
-        //ActiveRod = Requester->GetEquipmentComponent() ? Cast<AItemActor_FishingRod>(Requester->GetEquipmentComponent()->GetEquippedItemActor()) : nullptr;
-        UE_LOG(LogTemp, Warning, TEXT("Subsystem: State changed to ReadyToCast."));
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Toggle requested, entering fishing mode."));
+        EnterFishingStance(Requester); // Call the helper
     }
     else if (CurrentState == EFishingState::ReadyToCast)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Subsystem: Requesting to exit fishing mode."));
-        // The pawn's Tick logic will automatically handle stopping the turn
-        // and reverting to bOrientRotationToMovement = true. We don't need to do anything extra.
-        
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Toggle requested, exiting fishing mode."));
         ResetState();
     }
 }

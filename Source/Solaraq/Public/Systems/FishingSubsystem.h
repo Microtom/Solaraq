@@ -78,4 +78,5 @@ private:
 	virtual void Tick(float DeltaTime) override;
 	virtual bool IsTickable() const override { return true; }
 	virtual TStatId GetStatId() const override { return TStatId(); }
+	void EnterFishingStance(ASolaraqCharacterPawn* Requester);
 };
