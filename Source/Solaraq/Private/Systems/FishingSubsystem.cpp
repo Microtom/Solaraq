@@ -43,34 +43,30 @@ void UFishingSubsystem::RequestPrimaryAction(ASolaraqCharacterPawn* Caster, AIte
     UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: RequestPrimaryAction. Current State: %s"), *UEnum::GetValueAsString(CurrentState));
     switch (CurrentState)
     {
-    case EFishingState::ReadyToCast: // CHANGED: We now start casting from ReadyToCast
-        // The request is to start charging the cast
-            CurrentState = EFishingState::Casting;
-        CurrentFisher = Caster;
-        ActiveRod = Rod;
-        CastCharge = 0.f;
-        // You could also notify the player's anim blueprint to play a "charge" animation here.
-        break;
+    case EFishingState::ReadyToCast:
     case EFishingState::Idle:
-        // The request is to start charging the cast
-            CurrentState = EFishingState::Casting;
+        // This is the "start charging cast" logic. It remains unchanged.
+        CurrentState = EFishingState::Casting;
         CurrentFisher = Caster;
         ActiveRod = Rod;
         CastCharge = 0.f;
-        // You could also notify the player's anim blueprint to play a "charge" animation here.
         break;
+
+        // MODIFIED: This case now handles starting the reel for both a hooked fish AND an empty line.
     case EFishingState::Fishing:
     case EFishingState::FishHooked:
-        // The request is to start reeling. THIS IS THE SUCCESS CASE!
-        GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle); // Stop the "fish got away" timer!
-        
-        CurrentState = EFishingState::Reeling;
+        GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle); // Stop the "fish got away" timer if it was running.
         GetWorld()->GetTimerManager().ClearTimer(FishBiteTimerHandle); // Stop waiting for a new bite.
+
+        CurrentState = EFishingState::Reeling;
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Primary action in Fishing/Hooked state. Transitioning to Reeling."));
+
         if (ActiveRod)
         {
             ActiveRod->StartReeling();
         }
         break;
+        
     default:
         // Ignore request in other states (like Reeling or already Casting)
             break;
@@ -80,20 +76,35 @@ void UFishingSubsystem::RequestPrimaryAction(ASolaraqCharacterPawn* Caster, AIte
 void UFishingSubsystem::RequestPrimaryAction_Stop(ASolaraqCharacterPawn* Caster, AItemActor_FishingRod* Rod)
 {
     UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: RequestPrimaryAction_Stop. Current State: %s"), *UEnum::GetValueAsString(CurrentState));
-    if (CurrentState != EFishingState::Casting || Caster != CurrentFisher)
+
+    // --- Handle releasing a cast (Unchanged) ---
+    if (CurrentState == EFishingState::Casting && Caster == CurrentFisher)
     {
-        return; // Action is only valid if we are currently casting for this player
+        const FVector AimDirection = Caster->GetAimDirection();
+        Rod->SpawnAndCastBobber(AimDirection, CastCharge);
+    
+        CurrentState = EFishingState::Fishing;
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Cast released. New state: Fishing. Waiting for a bite."));
+
+        StartFishingSequence();
+        return; // Exit after handling
     }
 
-    // NEW: Get the aim direction from the pawn and pass it to the rod
-    const FVector AimDirection = Caster->GetAimDirection();
-    Rod->SpawnAndCastBobber(AimDirection, CastCharge);
-    
-    CurrentState = EFishingState::Fishing;
-    UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Cast released. New state: Fishing. Waiting for a bite."));
+    // --- NEW: Handle stopping the reel ---
+    if (CurrentState == EFishingState::Reeling && Caster == CurrentFisher)
+    {
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Reeling stopped. Returning to Fishing state."));
 
-    // Immediately start the sequence to wait for a fish bite.
-    StartFishingSequence();
+        if (ActiveRod)
+        {
+            ActiveRod->StopReeling();
+        }
+
+        // We stopped reeling, but the line is still out. Go back to waiting for a bite.
+        CurrentState = EFishingState::Fishing;
+        StartFishingSequence();
+        return; // Exit after handling
+    }
 }
 
 void UFishingSubsystem::OnToolUnequipped(AItemActor_FishingRod* Rod)
