@@ -110,9 +110,15 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Rope Simulation")
     float MaxRopeLength = 5000.0f; // 50 meters max
 
+    /** The minimum length the rope will be when cast (at zero charge). */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FishingRod|Physics")
+    float MinCastRopeLength = 300.0f;
+    
     UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Rope Simulation")
     float CastingSpeed = 500.0f; // How fast the line extends per second
 
+    UPROPERTY(EditDefaultsOnly, Category = "FishingRod|Casting")
+    float CastAngle = 45.0f;
     
 private:
     // --- Private Functions ---

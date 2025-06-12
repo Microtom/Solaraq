@@ -111,6 +111,27 @@ FVector ASolaraqCharacterPawn::GetAimDirection() const
     return GetActorForwardVector();
 }
 
+FRotator ASolaraqCharacterPawn::GetTargetAimingRotation() const
+{
+    return ProgrammaticTargetRotation;
+}
+
+void ASolaraqCharacterPawn::StartSmoothTurn(const FRotator& TargetRotation)
+{
+    if (bIsProgrammaticallyTurning)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Pawn::StartSmoothTurn - Already turning. Updating target rotation."));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Pawn::StartSmoothTurn - Initiating new turn."));
+    }
+
+    // We only care about the Yaw for a top-down game character turn.
+    ProgrammaticTargetRotation = FRotator(0.f, TargetRotation.Yaw, 0.f);
+    bIsProgrammaticallyTurning = true;
+}
+
 void ASolaraqCharacterPawn::BeginPlay()
 {
     Super::BeginPlay();
@@ -138,6 +159,35 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
+    // --- PROGRAMMATIC TURNING LOGIC ---
+    if (bIsProgrammaticallyTurning)
+    {
+        // While we are in a forced turn, we disable movement-based rotation.
+        GetCharacterMovement()->bOrientRotationToMovement = false;
+
+        const FRotator CurrentRotation = GetActorRotation();
+        
+        // Interpolate smoothly towards the target rotation
+        const FRotator NewRotation = FMath::RInterpTo(CurrentRotation.GetNormalized(), ProgrammaticTargetRotation.GetNormalized(), DeltaTime, AimTurnInterpSpeed);
+
+        UE_LOG(LogTemp, Warning, TEXT("Pawn::Tick - Turning. Current Yaw: %.2f, Target Yaw: %.2f, New Yaw: %.2f"), CurrentRotation.Yaw, ProgrammaticTargetRotation.Yaw, NewRotation.Yaw);
+
+        SetActorRotation(NewRotation);
+
+        // Check if the turn is complete (with a small tolerance)
+        if (FMath::IsNearlyEqual(NewRotation.Yaw, ProgrammaticTargetRotation.Yaw, 0.5f))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Pawn::Tick - Turn complete. Finalizing rotation and stopping turn."));
+            bIsProgrammaticallyTurning = false;
+            SetActorRotation(ProgrammaticTargetRotation); // Snap to final rotation
+        }
+    }
+    else
+    {
+        // When not in a forced turn, return to normal movement-based rotation.
+        GetCharacterMovement()->bOrientRotationToMovement = true;
+    }
+    
     if (UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>())
     {
         if (FishingSS->GetCurrentState() != EFishingState::Idle)

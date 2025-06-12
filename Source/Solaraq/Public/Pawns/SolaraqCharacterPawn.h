@@ -36,6 +36,8 @@ public:
 	
 	FVector GetAimDirection() const;
 
+	FRotator GetTargetAimingRotation() const;
+	void StartSmoothTurn(const FRotator& TargetRotation);
 	
 protected:
 	virtual void BeginPlay() override;
@@ -46,7 +48,8 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<UCameraComponent> CameraComponent;
 
-	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	float AimTurnInterpSpeed = 6.0f;
 
 	
     // --- Custom Camera Control ---
@@ -116,4 +119,10 @@ public:
 
 	FORCEINLINE class USpringArmComponent* GetSpringArmComponent() const { return SpringArmComponent; }
 	FORCEINLINE class UCameraComponent* GetCameraComponent() const { return CameraComponent; }
+
+	/** True if the pawn is currently executing a programmatic turn. */
+	bool bIsProgrammaticallyTurning = false;
+
+	/** The rotation the pawn is trying to reach. */
+	FRotator ProgrammaticTargetRotation;
 };
