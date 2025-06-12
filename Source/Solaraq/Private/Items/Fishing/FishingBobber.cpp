@@ -2,6 +2,7 @@
 #include "Items/Fishing/FishingBobber.h"
 #include "Components/SphereComponent.h"             // FIXED: Added include
 #include "Components/StaticMeshComponent.h"
+#include "Items/Fishing/ItemActor_FishingRod.h"
 #include "GameFramework/ProjectileMovementComponent.h" // FIXED: Added include
 #include "Logging/SolaraqLogChannels.h"
 #include "Systems/FishingSubsystem.h" 
@@ -16,6 +17,15 @@ AFishingBobber::AFishingBobber()
     CollisionComponent->SetSphereRadius(8.f);
     CollisionComponent->SetNotifyRigidBodyCollision(true); // REQUIRED for OnComponentHit to fire
 
+#define ECC_FishingLine ECC_GameTraceChannel1
+    
+    CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    CollisionComponent->SetCollisionObjectType(ECC_Pawn); // Or another appropriate type for a dynamic object
+    CollisionComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+    CollisionComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+    CollisionComponent->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+    CollisionComponent->SetCollisionResponseToChannel(ECC_FishingLine, ECR_Ignore);
+    
     MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
     MeshComponent->SetupAttachment(RootComponent);
     MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -33,34 +43,33 @@ void AFishingBobber::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    if (bIsInWater)
-    {
-        FVector CurrentLocation = GetActorLocation();
-        if (CurrentLocation.Z < WaterLevel)
-        {
-            float Depth = WaterLevel - CurrentLocation.Z;
-            FVector BuoyancyForce = FVector(0.f, 0.f, Depth * 150.f); 
-            ProjectileMovement->AddForce(BuoyancyForce);
-        }
-    }
 }
 
 // FIXED: The signature now matches the header and the delegate
 void AFishingBobber::OnBobberHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
-    UE_LOG(LogSolaraqFishing, Warning, TEXT("Bobber (%s): OnBobberHit called. Hit actor: %s"), *GetName(), *OtherActor->GetName());
-    
-    // Check if we hit a reasonably horizontal surface, which we'll assume is water.
-    // Ensure we don't trigger this on vertical walls.
-    if (Hit.ImpactNormal.Z > 0.7) // A value of 1.0 is perfectly flat. 0.7 allows for some slope.
+    if (Hit.ImpactNormal.Z > 0.7)
     {
+        if (AItemActor_FishingRod* OwningRod = Cast<AItemActor_FishingRod>(GetOwner()))
+        {
+            OwningRod->NotifyBobberLanded();
+        }
         if (UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>())
         {
-            //FishingSS->OnBobberLanded(this, Hit.ImpactPoint.Z);
-            
-            // To prevent this from firing multiple times, we can unbind it after the first valid hit.
-            CollisionComponent->OnComponentHit.RemoveDynamic(this, &AFishingBobber::OnBobberHit);
+            FishingSS->OnBobberLandedInWater();
         }
+        
+        // --- KEY CHANGE: NUKE THE BOBBER'S PHYSICS ---
+        ProjectileMovement->StopMovementImmediately();
+        ProjectileMovement->SetComponentTickEnabled(false);
+        // Make the collision sphere a non-simulating "ghost" so it doesn't fight the rope.
+        CollisionComponent->SetSimulatePhysics(false);
+        
+        // We no longer need our custom buoyancy logic, as the rope handles everything.
+        // StartFloating(Hit.ImpactPoint.Z); // REMOVE THIS
+        bIsInWater = false; // Disable the Tick logic for buoyancy.
+
+        CollisionComponent->OnComponentHit.RemoveDynamic(this, &AFishingBobber::OnBobberHit);
     }
 }
 
