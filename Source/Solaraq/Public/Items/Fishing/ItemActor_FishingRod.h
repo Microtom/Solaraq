@@ -44,6 +44,7 @@ public:
     void NotifyFishBite();
     void NotifyReset();
     void StopReeling();
+    void NotifyBobberLanded();
     
     // The length the rope is trying to reach
     float TargetRopeLength = 0.0f;
@@ -150,4 +151,5 @@ private:
     bool bIsCasting = false;
     bool bIsReeling = false;
     bool bIsRopeInitialized = false;
+    bool bBobberHasLanded = false;
 };

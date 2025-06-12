@@ -81,13 +81,16 @@ void UFishingSubsystem::RequestPrimaryAction_Stop(ASolaraqCharacterPawn* Caster,
     if (CurrentState == EFishingState::Casting && Caster == CurrentFisher)
     {
         const FVector AimDirection = Caster->GetAimDirection();
+
+        // This function now spawns the bobber, but we don't start the fishing timer yet.
         Rod->SpawnAndCastBobber(AimDirection, CastCharge);
     
-        CurrentState = EFishingState::Fishing;
-        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Cast released. New state: Fishing. Waiting for a bite."));
+        // We go to a new "waiting for land" state, or just reuse 'Fishing'
+        // For simplicity, let's just go to Fishing. The timer won't start until the bobber tells us.
+        CurrentState = EFishingState::Fishing; 
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Cast released. New state: Fishing. Waiting for BOBBER TO LAND."));
 
-        StartFishingSequence();
-        return; // Exit after handling
+        return; 
     }
 
     // --- NEW: Handle stopping the reel ---
@@ -243,4 +246,13 @@ void UFishingSubsystem::ResetState()
     
     GetWorld()->GetTimerManager().ClearTimer(FishBiteTimerHandle);
     GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle); 
+}
+
+void UFishingSubsystem::OnBobberLandedInWater()
+{
+    if (CurrentState == EFishingState::Fishing)
+    {
+        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Bobber has landed. Starting fish bite timer."));
+        StartFishingSequence();
+    }
 }

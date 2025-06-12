@@ -42,7 +42,8 @@ public:
 	void CatchFish();
 	void RequestToggleFishingMode(ASolaraqCharacterPawn* Requester);
 	void ResetState();
-
+	void OnBobberLandedInWater();
+	
 protected:
 	void StartFishingSequence();
     
