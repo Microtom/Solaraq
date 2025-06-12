@@ -9,6 +9,7 @@
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Items/ItemToolDataAsset.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 #include "Logging/SolaraqLogChannels.h"
 #include "Systems/FishingSubsystem.h"
 #include "DrawDebugHelpers.h"
@@ -411,8 +412,31 @@ AFishingBobber* AItemActor_FishingRod::SpawnAndCastBobber(const FVector& CastDir
 {
     UE_LOG(LogSolaraqFishing, Log, TEXT("Rod (%s): 'SpawnAndCastBobber' called. Starting to extend line."), *GetName());
 
+    // --- NEW: Calculate the angled launch direction ---
+
+    // 1. Get the axis to rotate around. This is the vector perpendicular to the aim direction and the world up vector.
+    //    For a forward aim (1,0,0), this axis will be (0,1,0) (the Y-axis).
+    const FVector RotationAxis = FVector::CrossProduct(CastDirection, FVector::UpVector).GetSafeNormal();
+
+    // 2. Rotate the horizontal direction vector upwards by our CastAngle.
+    const FVector LaunchDirection = CastDirection.RotateAngleAxis(CastAngle, RotationAxis);
+
+    // --- NEW: Draw Debug Line ---
+    const FVector RodTipLocation = RodMesh->GetSocketLocation(RodTipSocketName);
+    DrawDebugLine(
+        GetWorld(),
+        RodTipLocation,
+        RodTipLocation + LaunchDirection * 500.f, // Draw a 5m line in the launch direction
+        FColor::Green,
+        false, // Not persistent
+        30.0f,  // Lasts for 5 seconds
+        0,
+        10.f   // Thickness
+    );
+
     const float CastSpeed = FMath::Lerp(500.f, 2000.f, Charge);
-    const FVector InitialVelocity = CastDirection * CastSpeed;
+    // Use the new angled LaunchDirection for the velocity
+    const FVector InitialVelocity = LaunchDirection * CastSpeed;
 
     for (FVerletParticle& Particle : RopeParticles)
     {

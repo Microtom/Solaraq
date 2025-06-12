@@ -185,7 +185,7 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
             if (UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>())
             {
                 const EFishingState CurrentFishingState = FishingSS->GetCurrentState();
-                bIsInFishingMode_ThisFrame = (CurrentFishingState == EFishingState::ReadyToCast || CurrentFishingState == EFishingState::Casting);
+                bIsInFishingMode_ThisFrame = (CurrentFishingState != EFishingState::Idle);
             }
 
             // --- State Transition Logic ---
@@ -214,7 +214,7 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
                 TargetZoomLength = FishingModeZoomLength;
 
                 // 2. Set the target offset. This pushes the camera forward by the radius amount.
-                TargetCameraOffset = CharPawn->GetActorForwardVector() * CharPawn->FishingCameraRadius;
+                TargetCameraOffset = CharPawn->GetTargetAimingRotation().Vector() * CharPawn->FishingCameraRadius;
             }
             else
             {

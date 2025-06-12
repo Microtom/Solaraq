@@ -153,21 +153,30 @@ void UFishingSubsystem::RequestToggleFishingMode(ASolaraqCharacterPawn* Requeste
 
     if (CurrentState == EFishingState::Idle)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Subsystem: Requesting to enter fishing mode."));
+        
+        // --- NEW: USE THE PAWN'S SMOOTH TURN ---
         const FVector AimDirection = Requester->GetAimDirection();
         const FRotator TargetRotation = UKismetMathLibrary::MakeRotFromX(AimDirection);
-        Requester->SetActorRotation(TargetRotation);
+
+        UE_LOG(LogTemp, Warning, TEXT("Subsystem: Calculated Aim Direction: %s, resulting in Target Yaw: %.2f"), *AimDirection.ToString(), TargetRotation.Yaw);
         
+        UE_LOG(LogTemp, Warning, TEXT("Subsystem: Calling StartSmoothTurn on Pawn."));
+        Requester->StartSmoothTurn(TargetRotation);
+        // ---
+
         // Enter fishing mode
         CurrentState = EFishingState::ReadyToCast;
         CurrentFisher = Requester;
         //ActiveRod = Requester->GetEquipmentComponent() ? Cast<AItemActor_FishingRod>(Requester->GetEquipmentComponent()->GetEquippedItemActor()) : nullptr;
-        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Entered ReadyToCast state."));
-        // We will add the camera transition call here later.
+        UE_LOG(LogTemp, Warning, TEXT("Subsystem: State changed to ReadyToCast."));
     }
     else if (CurrentState == EFishingState::ReadyToCast)
     {
-        // Exit fishing mode, resetting back to idle
-        UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Exited ReadyToCast state."));
+        UE_LOG(LogTemp, Warning, TEXT("Subsystem: Requesting to exit fishing mode."));
+        // The pawn's Tick logic will automatically handle stopping the turn
+        // and reverting to bOrientRotationToMovement = true. We don't need to do anything extra.
+        
         ResetState();
     }
 }
