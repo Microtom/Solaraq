@@ -329,14 +329,32 @@ void ASolaraqCharacterPlayerController::HandleCharacterInteractInput()
 
 void ASolaraqCharacterPlayerController::HandlePrimaryUseStarted()
 {
-    UE_LOG(LogSolaraqFishing, Warning, TEXT("PC: HandlePrimaryUseStarted() - Input received."));
-    if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
+    ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
+
+    if (CharPawn)
     {
+        if (CharPawn->GetVelocity().SizeSquared() > 1.0f)
+        {
+            if (UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>())
+            {
+                const EFishingState CurrentFishingState = FishingSS->GetCurrentState();
+                // Allow reeling while moving slightly, but not starting a new cast.
+                if (CurrentFishingState == EFishingState::Idle || CurrentFishingState == EFishingState::ReadyToCast)
+                {
+                    UE_LOG(LogSolaraqFishing, Log, TEXT("PC: PrimaryUse blocked because pawn is moving."));
+                    return; // Abort!
+                }
+            }
+        }
+    
+        UE_LOG(LogSolaraqFishing, Warning, TEXT("PC: HandlePrimaryUseStarted() - Input received."));
+    
         if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
         {
             EquipComp->HandlePrimaryUse(); // Pass the command to the pawn's component
         }
     }
+    
 }
 
 void ASolaraqCharacterPlayerController::HandlePrimaryUseCompleted()
@@ -375,9 +393,20 @@ void ASolaraqCharacterPlayerController::HandleSecondaryUseCompleted()
 
 void ASolaraqCharacterPlayerController::HandleToggleFishingMode()
 {
+    ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
+    if (!CharPawn) return;
+
+    // --- NEW PRE-EMPTIVE CHECK ---
+    // You cannot enter fishing mode if you are moving.
+    if (CharPawn->GetVelocity().SizeSquared() > 1.0f)
+    {
+        UE_LOG(LogSolaraqFishing, Log, TEXT("PC: ToggleFishingMode blocked because pawn is moving."));
+        return; // Abort!
+    }
+    // --- END OF CHECK ---
+
     if (UFishingSubsystem* FishingSubsystem = GetWorld()->GetSubsystem<UFishingSubsystem>())
     {
-        // We just pass the request to the subsystem, it will handle the logic.
         FishingSubsystem->RequestToggleFishingMode(GetControlledCharacter());
     }
 }
