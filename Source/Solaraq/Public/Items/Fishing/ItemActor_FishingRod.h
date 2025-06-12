@@ -43,7 +43,8 @@ public:
     void StartReeling();
     void NotifyFishBite();
     void NotifyReset();
-
+    void StopReeling();
+    
     // The length the rope is trying to reach
     float TargetRopeLength = 0.0f;
 

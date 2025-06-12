@@ -227,11 +227,7 @@ void AItemActor_FishingRod::SimulateRope(float DeltaTime)
 
 void AItemActor_FishingRod::UpdateRopeLength(float DeltaTime)
 {
-    // 1. Adjust the TargetRopeLength based on input
-    if (bIsCasting)
-    {
-        TargetRopeLength += CastingSpeed * DeltaTime;
-    }
+    
     if (bIsReeling)
     {
         TargetRopeLength -= ReelSpeed * DeltaTime;
@@ -408,44 +404,37 @@ void AItemActor_FishingRod::PrimaryUse_Stop()
     }
 }
 
-AFishingBobber* AItemActor_FishingRod::SpawnAndCastBobber(const FVector& CastDirection, float Charge)
+AFishingBobber* AItemActor_FishingRod::SpawnAndCastBobber(const FVector& HorizontalCastDirection, float Charge)
 {
-    UE_LOG(LogSolaraqFishing, Log, TEXT("Rod (%s): 'SpawnAndCastBobber' called. Starting to extend line."), *GetName());
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Rod (%s): 'SpawnAndCastBobber' called. Charge: %.2f"), *GetName(), Charge);
 
-    // --- NEW: Calculate the angled launch direction ---
+    // --- STEP 1: Determine the length of the rope for this cast based on charge ---
+    TargetRopeLength = FMath::Lerp(MinCastRopeLength, MaxRopeLength, Charge);
+    
+    // --- STEP 2: Immediately resize the rope to this new length ---
+    // We pass 0.0f for DeltaTime because it's not used for this part of the logic.
+    // This synchronizes CurrentRopeLength and the particle array to our new TargetRopeLength.
+    UpdateRopeLength(0.0f);
 
-    // 1. Get the axis to rotate around. This is the vector perpendicular to the aim direction and the world up vector.
-    //    For a forward aim (1,0,0), this axis will be (0,1,0) (the Y-axis).
-    const FVector RotationAxis = FVector::CrossProduct(CastDirection, FVector::UpVector).GetSafeNormal();
+    // --- STEP 3: Calculate the launch velocity (this logic was already correct) ---
+    const FVector RotationAxis = FVector::CrossProduct(HorizontalCastDirection, FVector::UpVector).GetSafeNormal();
+    const FVector LaunchDirection = HorizontalCastDirection.RotateAngleAxis(CastAngle, RotationAxis);
 
-    // 2. Rotate the horizontal direction vector upwards by our CastAngle.
-    const FVector LaunchDirection = CastDirection.RotateAngleAxis(CastAngle, RotationAxis);
-
-    // --- NEW: Draw Debug Line ---
+    // Draw the debug line for visualization
     const FVector RodTipLocation = RodMesh->GetSocketLocation(RodTipSocketName);
-    DrawDebugLine(
-        GetWorld(),
-        RodTipLocation,
-        RodTipLocation + LaunchDirection * 500.f, // Draw a 5m line in the launch direction
-        FColor::Green,
-        false, // Not persistent
-        30.0f,  // Lasts for 5 seconds
-        0,
-        10.f   // Thickness
-    );
+    DrawDebugLine(GetWorld(), RodTipLocation, RodTipLocation + LaunchDirection * 500.f, FColor::Green, false, 5.0f, 0, 10.f);
 
     const float CastSpeed = FMath::Lerp(500.f, 2000.f, Charge);
-    // Use the new angled LaunchDirection for the velocity
     const FVector InitialVelocity = LaunchDirection * CastSpeed;
 
+    // --- STEP 4: Apply the velocity to our now correctly-sized rope ---
     for (FVerletParticle& Particle : RopeParticles)
     {
-        // Use Verlet integration to impart a velocity: V = (Pos - OldPos)
-        // So, OldPos = Pos - V * DeltaT
         Particle.OldPosition = Particle.Position - (InitialVelocity * TimeStep);
     }
-
-    bIsCasting = true;
+    
+    // We no longer need bIsCasting. The simulation is purely physics-driven now.
+    bIsCasting = false; // Set to false to be safe.
     bIsReeling = false;
 
     return nullptr;
@@ -486,4 +475,10 @@ void AItemActor_FishingRod::NotifyReset()
         CurrentBobber->Destroy();
         CurrentBobber = nullptr;
     }
+}
+
+void AItemActor_FishingRod::StopReeling()
+{
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Rod (%s): StopReeling() called."), *GetName());
+    bIsReeling = false;
 }
