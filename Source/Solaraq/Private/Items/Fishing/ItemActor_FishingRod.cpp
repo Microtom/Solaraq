@@ -151,7 +151,7 @@ void AItemActor_FishingRod::SimulateRope(float DeltaTime)
     // --- PRE-SIMULATION CHECKS ---
     if (RopeParticles.Num() < 2)
     {
-        return; // Not enough particles to form a rope
+        return;
     }
 
     if (GetWorld() == nullptr)
@@ -160,53 +160,44 @@ void AItemActor_FishingRod::SimulateRope(float DeltaTime)
         return;
     }
 
+    const FVector Gravity = FVector(0, 0, GetWorld()->GetGravityZ());
     const FVector RodTipLocation = RodMesh->GetSocketLocation(RodTipSocketName);
 
-    // --- LOGIC SPLIT: Is the line in the air or at rest? ---
+    // Check if the bobber is currently in the air (flying)
     if (CurrentBobber && !bBobberHasLanded)
     {
         // --- IN-AIR LOGIC (Bobber is flying) ---
-        // We use a quadratic Bezier curve for a stable, pleasing arc.
-        const FVector P0 = RodMesh->GetSocketLocation(RodTipSocketName);
-        const FVector P2 = CurrentBobber->GetActorLocation();
+        // Use a quadratic Bezier curve for a stable and visually pleasing arc that respects the ground.
+        
+        const FVector P0 = RodTipLocation;                              // Start Point
+        const FVector P2 = CurrentBobber->GetActorLocation();           // End Point
+
+        // Calculate the control point (P1) to create the arc
         const FVector MidPoint = (P0 + P2) * 0.5f;
-        const float SagMagnitude = FVector::Dist(P0, P2) * 0.15f;
-        const float WindSway = FMath::Sin(GetWorld()->GetTimeSeconds() * 2.0f) * 20.0f;
+        const float SagMagnitude = FVector::Dist(P0, P2) * 0.15f; // Tweak for more/less sag
+        const float WindSway = FMath::Sin(GetWorld()->GetTimeSeconds() * 2.0f) * 20.0f; // Tweak for wind effect
         const FVector P1 = MidPoint + FVector(0, 0, -SagMagnitude) + FVector(0, WindSway, 0);
 
         for (int32 i = 0; i < RopeParticles.Num(); ++i)
         {
+            // Position particles along the curve
             const float Alpha = (float)i / (float)(RopeParticles.Num() - 1);
             const float OneMinusAlpha = 1.0f - Alpha;
 
-            // Calculate the ideal position on the curve
             FVector ParticlePosition = 
                 (OneMinusAlpha * OneMinusAlpha * P0) +
                 (2.0f * OneMinusAlpha * Alpha * P1) +
                 (Alpha * Alpha * P2);
 
-            // --- NEW: GROUND COLLISION CHECK ---
-            // Now, check if this point is underground.
+            // Ground Collision Check for the in-air line
             FHitResult HitResult;
-            // We trace from a point high above the particle straight down through it.
             const FVector TraceStart = FVector(ParticlePosition.X, ParticlePosition.Y, ParticlePosition.Z + 200.0f);
             const FVector TraceEnd = FVector(ParticlePosition.X, ParticlePosition.Y, ParticlePosition.Z - 200.0f);
             
-            bool bHit = GetWorld()->LineTraceSingleByChannel(
-                HitResult,
-                TraceStart,
-                TraceEnd,
-                ECC_WorldStatic
-            );
-
-            // If we hit something AND the ideal particle position is below the impact point,
-            // then the particle is underground.
-            if (bHit && ParticlePosition.Z < HitResult.ImpactPoint.Z)
+            if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic) && ParticlePosition.Z < HitResult.ImpactPoint.Z)
             {
-                // Move the particle up to rest on the ground.
                 ParticlePosition.Z = HitResult.ImpactPoint.Z;
             }
-            // --- END OF NEW COLLISION CHECK ---
 
             RopeParticles[i].Position = ParticlePosition;
             RopeParticles[i].OldPosition = ParticlePosition;
@@ -214,17 +205,12 @@ void AItemActor_FishingRod::SimulateRope(float DeltaTime)
     }
     else
     {
-        // --- PATH 2: AT-REST / REELING LOGIC (Bobber has landed or there is no bobber) ---
-        // This is our original, more complex physics simulation for draping, dangling, and reeling.
-        
-        // (Enable this log for intense debugging of the at-rest state)
-        // UE_LOG(LogSolaraqFishing, Verbose, TEXT("SimulateRope: AT-REST path. Simulating with full physics."));
+        // --- AT-REST / REELING LOGIC (Bobber has landed or is being reeled) ---
+        // Use a Verlet integration simulation that includes gravity and collision for all particles.
 
-        const FVector Gravity = FVector(0, 0, GetWorld()->GetGravityZ());
-
-        // --- STEP 2A: VERLET INTEGRATION (Gravity & Damping) ---
-        // Applies physics to all "free" particles in the middle of the rope.
-        for (int32 i = 1; i < RopeParticles.Num() - 1; ++i)
+        // STEP 1: VERLET INTEGRATION (APPLY GRAVITY & DAMPING)
+        // This loop now includes the last particle, re-applying gravity to our simulated bobber.
+        for (int32 i = 1; i < RopeParticles.Num(); ++i)
         {
             FVector& Position = RopeParticles[i].Position;
             FVector& OldPosition = RopeParticles[i].OldPosition;
@@ -234,30 +220,13 @@ void AItemActor_FishingRod::SimulateRope(float DeltaTime)
             Position += Velocity + (Gravity * DeltaTime * DeltaTime);
         }
         
-        // --- STEP 2B: CONSTRAINT SOLVING (Relaxation) ---
-        // This loop runs multiple times to enforce the rope's structure.
-        for (int32 i = 0; i < RopeSolverIterations; ++i)
+        // STEP 2: CONSTRAINT SOLVING (MAINTAIN ROPE LENGTH)
+        for (int32 Iteration = 0; Iteration < RopeSolverIterations; ++Iteration)
         {
-            // ANCHOR 1: The start of the rope is always at the rod tip.
+            // Anchor the first particle to the rod tip
             RopeParticles[0].Position = RodTipLocation;
 
-            // ANCHOR 2: The end of the rope is attached to the bobber if it exists and has landed.
-            // If there's no bobber, we let the end particle dangle freely under its own physics.
-            if (CurrentBobber && bBobberHasLanded)
-            {
-                // This will be overridden at the end of Tick, but setting it here helps the constraint solver.
-                RopeParticles.Last().Position = CurrentBobber->GetActorLocation();
-            }
-            else // No bobber, or it's in the air (this path shouldn't be taken if in-air, but it's a safe fallback)
-            {
-                FVector& Position = RopeParticles.Last().Position;
-                FVector& OldPosition = RopeParticles.Last().OldPosition;
-                const FVector Velocity = (Position - OldPosition) * Damping;
-                OldPosition = Position;
-                Position += Velocity + (Gravity * DeltaTime * DeltaTime);
-            }
-
-            // SOLVE PARTIAL FIRST SEGMENT:
+            // Solve partial first segment (if reeling)
             if (RopeParticles.Num() > 1)
             {
                 const float NumFullSegments = RopeParticles.Num() > 2 ? RopeParticles.Num() - 2 : 0;
@@ -269,14 +238,14 @@ void AItemActor_FishingRod::SimulateRope(float DeltaTime)
                 float CurrentDistance = Delta.Size();
                 float Error = CurrentDistance - FirstSegmentLength;
 
-                if (Error > 0) // Only PULL, never push.
+                if (Error > 0) // Only pull, never push
                 {
                     FVector ChangeDir = (CurrentDistance > KINDA_SMALL_NUMBER) ? Delta / CurrentDistance : FVector(0,0,-1);
                     ParticleB_Pos -= ChangeDir * Error;
                 }
             }
             
-            // SOLVE FULL-LENGTH SEGMENTS:
+            // Solve full-length segments
             for (int32 j = 1; j < RopeParticles.Num() - 1; ++j)
             {
                 FVector& SegA = RopeParticles[j].Position;
@@ -286,7 +255,7 @@ void AItemActor_FishingRod::SimulateRope(float DeltaTime)
                 float CurrentDistance = Delta.Size();
                 float Error = CurrentDistance - RopeSegmentLength;
 
-                if (Error > 0) // Only PULL, never push.
+                if (Error > 0) // Only pull, never push
                 {
                     FVector ChangeDir = (CurrentDistance > KINDA_SMALL_NUMBER) ? Delta / CurrentDistance : FVector(0,0,-1);
                     FVector ChangeAmount = ChangeDir * Error * 0.5f;
@@ -297,21 +266,18 @@ void AItemActor_FishingRod::SimulateRope(float DeltaTime)
             }
         }
 
-        // --- STEP 2C: COLLISION & RESPONSE ---
-        // Allows the rope to drape over the environment.
+        // STEP 3: COLLISION & RESPONSE (APPLY WORLD COLLISION)
+        // This loop also includes the last particle, ensuring the bobber is dragged along the ground.
         const float Friction = 0.2f;
         const float Bounce = 0.1f;
-        for (int32 i = 1; i < RopeParticles.Num() - 1; ++i)
+        for (int32 i = 1; i < RopeParticles.Num(); ++i)
         {
             FVector& Position = RopeParticles[i].Position;
             FVector& OldPosition = RopeParticles[i].OldPosition;
 
             FHitResult HitResult;
-            bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, OldPosition, Position, ECC_WorldStatic);
-
-            if (bHit)
+            if (GetWorld()->LineTraceSingleByChannel(HitResult, OldPosition, Position, ECC_WorldStatic))
             {
-                // UE_LOG(LogSolaraqFishing, Verbose, TEXT("SimulateRope: Rope particle %d collided with %s"), i, *HitResult.GetActor()->GetName());
                 const FVector DepenetrationVector = HitResult.ImpactNormal * 0.1f;
                 const FVector ImpactVelocity = Position - OldPosition;
                 const FVector NormalComponent = HitResult.ImpactNormal * FVector::DotProduct(ImpactVelocity, HitResult.ImpactNormal);
