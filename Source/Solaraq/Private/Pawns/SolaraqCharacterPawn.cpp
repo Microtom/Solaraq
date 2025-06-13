@@ -132,6 +132,21 @@ void ASolaraqCharacterPawn::StartSmoothTurn(const FRotator& TargetRotation)
     bIsProgrammaticallyTurning = true;
 }
 
+void ASolaraqCharacterPawn::SetContinuousAiming(bool bEnable)
+{
+    bShouldContinuouslyAim = bEnable;
+    if (bEnable)
+    {
+        // When we start aiming, disable movement-based rotation.
+        GetCharacterMovement()->bOrientRotationToMovement = false;
+    }
+    else
+    {
+        // When we stop, re-enable it.
+        GetCharacterMovement()->bOrientRotationToMovement = true;
+    }
+}
+
 void ASolaraqCharacterPawn::BeginPlay()
 {
     Super::BeginPlay();
@@ -181,6 +196,26 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
             bIsProgrammaticallyTurning = false;
             SetActorRotation(ProgrammaticTargetRotation); // Snap to final rotation
         }
+    }
+    else if (bShouldContinuouslyAim)
+    {
+        // If we are continuously aiming, we keep bOrientRotationToMovement false
+        GetCharacterMovement()->bOrientRotationToMovement = false;
+
+        // Get the current aim direction from the cursor
+        const FVector AimDirection = GetAimDirection();
+        const FRotator AimRotation = AimDirection.Rotation();
+
+        // We only care about Yaw for the character's rotation
+        const FRotator CurrentRotation = GetActorRotation();
+        const FRotator TargetRotation = FRotator(0.f, AimRotation.Yaw, 0.f);
+
+        // Interpolate smoothly towards the target rotation
+        const FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, AimTurnInterpSpeed);
+        SetActorRotation(NewRotation);
+
+        // We also need to update the ProgrammaticTargetRotation for the camera to use.
+        ProgrammaticTargetRotation = NewRotation; 
     }
     else
     {
