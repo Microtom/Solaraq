@@ -44,10 +44,7 @@ void UFishingSubsystem::EnterFishingStance(ASolaraqCharacterPawn* Requester)
 
     UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Entering fishing stance for %s."), *Requester->GetName());
 
-    // This is the logic from the old RequestToggleFishingMode
-    const FVector AimDirection = Requester->GetAimDirection();
-    const FRotator TargetRotation = UKismetMathLibrary::MakeRotFromX(AimDirection);
-    Requester->StartSmoothTurn(TargetRotation);
+    Requester->SetContinuousAiming(true);
 
     CurrentState = EFishingState::ReadyToCast;
     CurrentFisher = Requester;
@@ -102,19 +99,18 @@ void UFishingSubsystem::RequestPrimaryAction_Stop(ASolaraqCharacterPawn* Caster,
     // --- Handle releasing a cast (Unchanged) ---
     if (CurrentState == EFishingState::Casting && Caster == CurrentFisher)
     {
-        const FVector AimDirection = Caster->GetAimDirection();
+        // When we cast the line, we should stop continuously aiming.
+        Caster->SetContinuousAiming(false); // NEW
 
-        // This function now spawns the bobber, but we don't start the fishing timer yet.
+        const FVector AimDirection = Caster->GetAimDirection();
         Rod->SpawnAndCastBobber(AimDirection, CastCharge);
     
-        // We go to a new "waiting for land" state, or just reuse 'Fishing'
-        // For simplicity, let's just go to Fishing. The timer won't start until the bobber tells us.
-        CurrentState = EFishingState::Fishing; 
+        CurrentState = EFishingState::Fishing;
         UE_LOG(LogSolaraqFishing, Log, TEXT("Subsystem: Cast released. New state: Fishing. Waiting for BOBBER TO LAND."));
 
         return; 
     }
-
+    
     // --- NEW: Handle stopping the reel ---
     if (CurrentState == EFishingState::Reeling && Caster == CurrentFisher)
     {
@@ -238,6 +234,11 @@ void UFishingSubsystem::OnFishGotAway()
 
 void UFishingSubsystem::ResetState()
 {
+    if (CurrentFisher)
+    {
+        CurrentFisher->SetContinuousAiming(false); // NEW
+    }
+    
     if (ActiveRod)
     {
         ActiveRod->NotifyReset();

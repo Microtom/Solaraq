@@ -38,6 +38,7 @@ public:
 
 	FRotator GetTargetAimingRotation() const;
 	void StartSmoothTurn(const FRotator& TargetRotation);
+	void SetContinuousAiming(bool bEnable);
 	
 protected:
 	virtual void BeginPlay() override;
@@ -125,4 +126,6 @@ public:
 
 	/** The rotation the pawn is trying to reach. */
 	FRotator ProgrammaticTargetRotation;
+
+	bool bShouldContinuouslyAim = false; 
 };
