@@ -8,6 +8,7 @@
 #include "InputAction.h"
 #include "NavigationSystem.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
+#include "Blueprint/UserWidget.h"
 #include "Core/SolaraqGameInstance.h" // For level transition
 #include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h" // For OpenLevel
@@ -26,6 +27,35 @@ ASolaraqCharacterPlayerController::ASolaraqCharacterPlayerController()
 ASolaraqCharacterPawn* ASolaraqCharacterPlayerController::GetControlledCharacter() const
 {
     return Cast<ASolaraqCharacterPawn>(GetPawn());
+}
+
+void ASolaraqCharacterPlayerController::ShowFishingHUD()
+{
+    if (!FishingHUDWidgetClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("FishingHUDWidgetClass is not set in the PlayerController Blueprint!"));
+        return;
+    }
+
+    if (!FishingHUDWidgetInstance)
+    {
+        FishingHUDWidgetInstance = CreateWidget<UUserWidget>(this, FishingHUDWidgetClass);
+    }
+    
+    if (FishingHUDWidgetInstance && !FishingHUDWidgetInstance->IsInViewport())
+    {
+        FishingHUDWidgetInstance->AddToViewport();
+    }
+}
+
+void ASolaraqCharacterPlayerController::HideFishingHUD()
+{
+    if (FishingHUDWidgetInstance && FishingHUDWidgetInstance->IsInViewport())
+    {
+        FishingHUDWidgetInstance->RemoveFromParent();
+        // We can let it be garbage collected or null it out if we want to be explicit
+        // For this simple case, just removing it is fine. It will be re-used next time.
+    }
 }
 
 void ASolaraqCharacterPlayerController::ApplyCharacterInputMappingContext()
@@ -184,63 +214,116 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
             bool bIsInFishingMode_ThisFrame = false;
             if (UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>())
             {
-                const EFishingState CurrentFishingState = FishingSS->GetCurrentState();
-                bIsInFishingMode_ThisFrame = (CurrentFishingState != EFishingState::Idle);
+                bIsInFishingMode_ThisFrame = (FishingSS->GetCurrentState() != EFishingState::Idle);
             }
 
             // --- State Transition Logic ---
-
-            // Check if we just ENTERED fishing mode
             if (bIsInFishingMode_ThisFrame && !bWasInFishingMode_LastFrame)
             {
-                // This is the first frame of fishing. Save the current zoom.
                 PreFishingZoomLength = TargetZoomLength;
-                UE_LOG(LogTemp, Warning, TEXT("Entering Fishing Mode. Saved Zoom: %.f"), PreFishingZoomLength);
             }
-            // Check if we just EXITED fishing mode
             else if (!bIsInFishingMode_ThisFrame && bWasInFishingMode_LastFrame)
             {
-                // This is the first frame after fishing. Restore the saved zoom.
                 TargetZoomLength = PreFishingZoomLength;
-                UE_LOG(LogTemp, Warning, TEXT("Exiting Fishing Mode. Restoring Zoom to: %.f"), TargetZoomLength);
             }
 
             // --- Continuous State Logic ---
-            
             if (bIsInFishingMode_ThisFrame)
             {
                 // While in fishing mode:
-                // 1. Set the target zoom to maximum.
                 TargetZoomLength = FishingModeZoomLength;
-
-                // 2. Set the target offset. This pushes the camera forward by the radius amount.
                 TargetCameraOffset = CharPawn->GetTargetAimingRotation().Vector() * CharPawn->FishingCameraRadius;
+                
+                // Reset custom lag state when entering fishing mode
+                CurrentCameraTargetOffset = FVector::ZeroVector;
+                bIsInForcedRejoinState = false;
+                TimeAtMaxOffset = 0.f;
             }
-            else
+            else // --- NOT FISHING: USE CUSTOM LOOK-AHEAD LOGIC ---
             {
-                // While not in fishing mode, the camera should be centered.
-                TargetCameraOffset = FVector::ZeroVector;
+                if (bUseCustomCameraLag)
+                {
+                    const FVector CharacterVelocity = CharPawn->GetVelocity();
+                    const FVector VelocityDirection = CharacterVelocity.GetSafeNormal();
+
+                    if (CharacterVelocity.SizeSquared() > 1.f) // If character is moving
+                    {
+                        // Check for significant direction change to reset rejoin logic
+                        if (FVector::DotProduct(VelocityDirection, LastMovementDirection) < RejoinDirectionChangeThreshold)
+                        {
+                            bIsInForcedRejoinState = false;
+                            TimeAtMaxOffset = 0.0f;
+                        }
+
+                        if (bIsInForcedRejoinState)
+                        {
+                            // We are forcing the camera to shrink back towards the character.
+                            // It will stay in this state until the player stops or changes direction.
+                            if (RejoinInterpolationMethod == ERejoinInterpolationType::Linear)
+                            {
+                                CurrentCameraTargetOffset = FMath::VInterpConstantTo(CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraForcedRejoinSpeed_Linear);
+                            }
+                            else // InterpTo
+                            {
+                                CurrentCameraTargetOffset = FMath::VInterpTo(CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraForcedRejoinSpeed_Interp);
+                            }
+
+                            // --- FIX: REMOVED THE PREMATURE EXIT CONDITION ---
+                            // The logic to exit the rejoin state is now solely handled by the player
+                            // stopping or changing direction.
+                        }
+                        else // Normal look-ahead behavior
+                        {
+                            const FVector DesiredOffset = VelocityDirection * CameraLookAheadFactor;
+                            CurrentCameraTargetOffset = FMath::VInterpTo(CurrentCameraTargetOffset, DesiredOffset, DeltaTime, CustomCameraLagSpeed);
+
+                            if (FMath::IsNearlyEqual(CurrentCameraTargetOffset.Size(), MaxCameraTargetOffset, 1.0f))
+                            {
+                                CurrentCameraTargetOffset = CurrentCameraTargetOffset.GetSafeNormal() * MaxCameraTargetOffset;
+                                
+                                TimeAtMaxOffset += DeltaTime;
+                                if (TimeAtMaxOffset >= DelayBeforeForcedRejoin)
+                                {
+                                    bIsInForcedRejoinState = true;
+                                    DirectionWhenForcedRejoinStarted = VelocityDirection;
+                                }
+                            }
+                            else
+                            {
+                                TimeAtMaxOffset = 0.0f;
+                            }
+                        }
+                        LastMovementDirection = VelocityDirection;
+                    }
+                    else // If character is standing still
+                    {
+                        // Reset all states and recenter the camera
+                        bIsInForcedRejoinState = false;
+                        TimeAtMaxOffset = 0.0f;
+                        LastMovementDirection = FVector::ZeroVector;
+                        CurrentCameraTargetOffset = FMath::VInterpTo(CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraRecenteringSpeed);
+                    }
+                    
+                    TargetCameraOffset = CurrentCameraTargetOffset;
+                }
+                else // bUseCustomCameraLag is false
+                {
+                    TargetCameraOffset = FVector::ZeroVector;
+                }
             }
 
-            // --- Interpolation (This part is now always correct) ---
-
-            // Interpolate Target Arm Length (Zoom)
+            // --- UNIVERSAL INTERPOLATION (applies to all states) ---
             SpringArm->TargetArmLength = FMath::FInterpTo(SpringArm->TargetArmLength, TargetZoomLength, DeltaTime, ZoomInterpSpeed);
-
-            // Interpolate Target Offset (Position)
             SpringArm->TargetOffset = FMath::VInterpTo(SpringArm->TargetOffset, TargetCameraOffset, DeltaTime, CameraOffsetInterpSpeed);
 
-            // Interpolate Rotation based on the Curve
             if (CameraZoomCurve)
             {
                 const float TargetPitch = CameraZoomCurve->GetFloatValue(SpringArm->TargetArmLength);
                 const FRotator CurrentRotation = SpringArm->GetRelativeRotation();
                 const FRotator TargetRotation = FRotator(TargetPitch * -1.f, CurrentRotation.Yaw, CurrentRotation.Roll);
-                const FRotator InterpolatedRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, RotationInterpSpeed);
-                SpringArm->SetRelativeRotation(InterpolatedRotation);
+                SpringArm->SetRelativeRotation(FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, RotationInterpSpeed));
             }
 
-            // Finally, update our state tracker for the next frame.
             bWasInFishingMode_LastFrame = bIsInFishingMode_ThisFrame;
         }
     }

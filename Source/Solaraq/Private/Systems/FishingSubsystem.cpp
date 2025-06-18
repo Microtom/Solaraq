@@ -1,6 +1,7 @@
 // FishingSubsystem.cpp
 #include "Systems/FishingSubsystem.h"
 
+#include "Controllers/SolaraqCharacterPlayerController.h"
 #include "Items/ItemDataAssetBase.h"
 #include "Items/Fishing/FishDataTable.h"
 #include "Pawns/SolaraqCharacterPawn.h"
@@ -18,10 +19,12 @@ void UFishingSubsystem::Tick(float DeltaTime)
     }
     
     // Check if reeling is finished
-    if (CurrentState == EFishingState::Reeling && ActiveRod)
+    if (CurrentState == EFishingState::Reeling)
     {
+        UpdateTension(DeltaTime);
+
         // A simple condition to check if the fish is "caught"
-        if (ActiveRod->CurrentRopeLength <= ActiveRod->RopeSegmentLength * 2.0f)
+        if (ActiveRod && ActiveRod->CurrentRopeLength <= ActiveRod->RopeSegmentLength * 2.0f)
         {
             CatchFish();
         }
@@ -48,6 +51,69 @@ void UFishingSubsystem::EnterFishingStance(ASolaraqCharacterPawn* Requester)
 
     CurrentState = EFishingState::ReadyToCast;
     CurrentFisher = Requester;
+}
+
+void UFishingSubsystem::UpdateTension(float DeltaTime)
+{
+    if (!ActiveRod) return;
+
+    // Is the player actively reeling? (Holding the button)
+    const bool bIsPlayerReeling = ActiveRod->IsReeling();
+
+    // 1. Tension increases if the player is reeling.
+    if (bIsPlayerReeling)
+    {
+        CurrentLineTension += TensionIncreaseRate * DeltaTime;
+    }
+    // 2. Tension increases SIGNIFICANTLY if the fish is pulling.
+    if (bIsFishPulling)
+    {
+        CurrentLineTension += FishPullTensionRate * DeltaTime;
+    }
+    // 3. Tension decreases if the player is NOT reeling and the fish is NOT pulling.
+    if (!bIsPlayerReeling && !bIsFishPulling)
+    {
+        CurrentLineTension -= TensionDecreaseRate * DeltaTime;
+    }
+    
+    // Clamp the value between 0 and max.
+    CurrentLineTension = FMath::Clamp(CurrentLineTension, 0.f, MaxLineTension);
+
+    // 4. Check for failure!
+    if (CurrentLineTension >= MaxLineTension)
+    {
+        OnLineSnap();
+        return; // Stop further processing
+    }
+
+    // This is where you'd update a UI element to show the tension meter.
+    // For now, let's log it.
+    UE_LOG(LogSolaraqFishing, Log, TEXT("Tension: %.2f | PlayerReeling: %d | FishPulling: %d"),
+        CurrentLineTension, bIsPlayerReeling, bIsFishPulling);
+}
+
+void UFishingSubsystem::StartFishBehavior()
+{
+    bIsFishPulling = true; // Start by pulling
+    float InitialDelay = FMath::RandRange(0.5f, 1.5f); // Time until first behavior change
+    GetWorld()->GetTimerManager().SetTimer(FishBehaviorTimerHandle, this, &UFishingSubsystem::ToggleFishBehavior, InitialDelay, true);
+}
+
+void UFishingSubsystem::ToggleFishBehavior()
+{
+    bIsFishPulling = !bIsFishPulling;
+
+    // Set next toggle time. Fish could pull for short bursts (1-2s) 
+    // and rest for longer periods (2-4s).
+    float NextToggleTime = bIsFishPulling ? FMath::RandRange(1.0f, 2.0f) : FMath::RandRange(2.0f, 4.0f);
+    GetWorld()->GetTimerManager().SetTimer(FishBehaviorTimerHandle, this, &UFishingSubsystem::ToggleFishBehavior, NextToggleTime, false);
+}
+
+void UFishingSubsystem::OnLineSnap()
+{
+    UE_LOG(LogSolaraqFishing, Warning, TEXT("LINE SNAPPED!"));
+    // Here you would play a sound effect, show a message.
+    ResetState();
 }
 
 void UFishingSubsystem::RequestPrimaryAction(ASolaraqCharacterPawn* Caster, AItemActor_FishingRod* Rod)
@@ -77,7 +143,6 @@ void UFishingSubsystem::RequestPrimaryAction(ASolaraqCharacterPawn* Caster, AIte
 
     case EFishingState::Fishing:
     case EFishingState::FishHooked:
-        // Reeling logic is unchanged
         GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle);
         CurrentState = EFishingState::Reeling;
         GetWorld()->GetTimerManager().ClearTimer(FishBiteTimerHandle);
@@ -85,6 +150,12 @@ void UFishingSubsystem::RequestPrimaryAction(ASolaraqCharacterPawn* Caster, AIte
         {
             ActiveRod->StartReeling();
         }
+        // NEW: Show the HUD
+        if (ASolaraqCharacterPlayerController* PC = Cast<ASolaraqCharacterPlayerController>(CurrentFisher->GetController()))
+        {
+            PC->ShowFishingHUD();
+        }
+        StartFishBehavior();
         break;
 
     default:
@@ -195,6 +266,15 @@ void UFishingSubsystem::RequestToggleFishingMode(ASolaraqCharacterPawn* Requeste
     }
 }
 
+float UFishingSubsystem::GetLineTensionPercent() const
+{
+    if (MaxLineTension <= 0.f)
+    {
+        return 0.f;
+    }
+    return CurrentLineTension / MaxLineTension;
+}
+
 void UFishingSubsystem::StartFishingSequence()
 {
     float TimeToBite = FMath::RandRange(5.0f, 15.0f);
@@ -237,8 +317,14 @@ void UFishingSubsystem::ResetState()
     if (CurrentFisher)
     {
         CurrentFisher->SetContinuousAiming(false); // NEW
+
+        if (ASolaraqCharacterPlayerController* PC = Cast<ASolaraqCharacterPlayerController>(CurrentFisher->GetController()))
+        {
+            PC->HideFishingHUD();
+        }
+        CurrentFisher->SetContinuousAiming(false);
     }
-    
+
     if (ActiveRod)
     {
         ActiveRod->NotifyReset();
@@ -250,7 +336,11 @@ void UFishingSubsystem::ResetState()
     // ActiveBobber = nullptr; // No longer needed
     
     GetWorld()->GetTimerManager().ClearTimer(FishBiteTimerHandle);
-    GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle); 
+    GetWorld()->GetTimerManager().ClearTimer(HookedTimerHandle);
+    GetWorld()->GetTimerManager().ClearTimer(FishBehaviorTimerHandle);
+
+    bIsFishPulling = false;
+    CurrentLineTension = 0.0f;
 }
 
 void UFishingSubsystem::OnBobberLandedInWater()

@@ -150,13 +150,7 @@ void ASolaraqCharacterPawn::SetContinuousAiming(bool bEnable)
 void ASolaraqCharacterPawn::BeginPlay()
 {
     Super::BeginPlay();
-    if (bUseCustomCameraLag)
-    {
-        // If using custom lag, the spring arm's built-in location lag might interfere
-        // or produce a double-lag effect. We primarily control its TargetOffset.
-        // SpringArmComponent->bEnableCameraLag = false; // Let's test with it ON first.
-        // The target offset itself will be lagged by our code.
-    }
+    
     if (InventoryComponent && EquipmentComponent)
     {
         // Load the Data Asset we created in the editor
@@ -255,40 +249,6 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
                 0,
                 5.f
             );
-        }
-    }
-
-    bool bIsFishingActive = false;
-    if (UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>())
-    {
-        bIsFishingActive = (FishingSS->GetCurrentState() != EFishingState::Idle);
-    }
-    
-    if (bUseCustomCameraLag && SpringArmComponent && !bIsFishingActive)
-    {
-        // The entire block of your existing camera look-ahead logic goes here.
-        // It will now be completely skipped when any fishing state is active.
-        
-        FVector CharacterVelocity = GetVelocity();
-        // ... all of your existing custom camera lag code remains here
-        // ...
-        // SpringArmComponent->TargetOffset = CurrentCameraTargetOffset;
-    }
-    else if (SpringArmComponent) 
-    {
-        // If fishing IS active, or if custom lag is disabled, we must ensure
-        // the pawn's logic doesn't interfere. We let the PlayerController
-        // handle the TargetOffset exclusively.
-        // The 'else if' for when bUseCustomCameraLag is false can remain,
-        // as it correctly resets the values.
-        if (!bUseCustomCameraLag)
-        {
-            SpringArmComponent->TargetOffset = FVector::ZeroVector;
-            CurrentCameraTargetOffset = FVector::ZeroVector;
-            bIsInForcedRejoinState = false;
-            TimeAtMaxOffset = 0.0f;
-            LastMovementDirection = FVector::ZeroVector;
-            DirectionWhenForcedRejoinStarted = FVector::ZeroVector;
         }
     }
 }

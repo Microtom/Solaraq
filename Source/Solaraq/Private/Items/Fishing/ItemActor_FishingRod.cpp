@@ -326,6 +326,17 @@ void AItemActor_FishingRod::SimulateRope(float DeltaTime)
 
 void AItemActor_FishingRod::UpdateRopeLength(float DeltaTime)
 {
+    UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>();
+    if (FishingSS && FishingSS->IsFishPulling()) // You'll need to add IsFishPulling() to the subsystem
+    {
+        // Fish pulls the line out
+        TargetRopeLength += FishPullSpeed * DeltaTime; // Add a FishPullSpeed property to the rod
+    }
+    else if (bIsReeling)
+    {
+        // Player reels the line in
+        TargetRopeLength -= ReelSpeed * DeltaTime;
+    }
     
     if (bIsReeling)
     {

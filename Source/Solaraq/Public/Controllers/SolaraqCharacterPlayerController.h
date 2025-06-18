@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Controllers/SolaraqBasePlayerController.h" // Inherit from our new base
+#include "Pawns/SolaraqCharacterPawn.h"
 #include "SolaraqCharacterPlayerController.generated.h"
 
 struct FInputActionValue;
@@ -23,6 +24,11 @@ public:
     // --- Pawn Getter ---
     ASolaraqCharacterPawn* GetControlledCharacter() const;
 
+    /** Creates and shows the fishing HUD widget. */
+    void ShowFishingHUD();
+    /** Hides and cleans up the fishing HUD widget. */
+    void HideFishingHUD();
+    
 protected:
     //~ Begin ASolaraqBasePlayerController Interface (Overrides)
     virtual void BeginPlay() override;
@@ -87,6 +93,45 @@ protected:
 
     float PreFishingZoomLength;
     bool bWasInFishingMode_LastFrame = false;
+
+    // --- Custom Camera Lag ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag")
+    bool bUseCustomCameraLag = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
+    float CustomCameraLagSpeed = 2.0f;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
+    float CameraLookAheadFactor = 150.0f; 
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
+    float CameraRecenteringSpeed = 2.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
+    float MaxCameraTargetOffset = 150.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
+    ERejoinInterpolationType RejoinInterpolationMethod = ERejoinInterpolationType::Linear;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
+    float CameraForcedRejoinSpeed_Interp = 1.0f; 
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag", ClampMin = "0.0"))
+    float CameraForcedRejoinSpeed_Linear = 20.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag", ClampMin = "-1.0", ClampMax = "1.0"))
+    float RejoinDirectionChangeThreshold = 0.1f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
+    float DelayBeforeForcedRejoin = 0.25f;
+    
+    /** The class of the fishing HUD widget to create. Assign this in the PlayerController Blueprint. */
+    UPROPERTY(EditDefaultsOnly, Category = "UI")
+    TSubclassOf<UUserWidget> FishingHUDWidgetClass;
+
+    /** A pointer to the instance of the fishing HUD, so we can show/hide it. */
+    UPROPERTY()
+    TObjectPtr<UUserWidget> FishingHUDWidgetInstance;
     
     // --- Input Handling Functions (Character & Shared Handlers) ---
     void HandlePointerMove(const FInputActionValue& Value);
@@ -109,5 +154,15 @@ private:
     UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Input|Character")
     float MoveRequestDebounceTime = 0.2f;
 
-    float TargetZoomLength; 
+    float TargetZoomLength;
+
+    // --- Camera Lag State Variables ---
+    FVector CurrentCameraTargetOffset; 
+    bool bIsInForcedRejoinState = false;
+    float TimeAtMaxOffset = 0.0f;
+    FVector LastMovementDirection = FVector::ZeroVector;
+    FVector DirectionWhenForcedRejoinStarted = FVector::ZeroVector;
+    
+	
+    bool bIsMaxOffsetReached = false;        // True if current offset is at/near max
 };
