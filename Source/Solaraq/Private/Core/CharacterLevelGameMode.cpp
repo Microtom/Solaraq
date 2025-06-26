@@ -7,7 +7,6 @@
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerStart.h"
 #include "EngineUtils.h" // For TActorIterator
-#include "Controllers/SolaraqPlayerController.h"
 #include "Logging/SolaraqLogChannels.h"
 
 

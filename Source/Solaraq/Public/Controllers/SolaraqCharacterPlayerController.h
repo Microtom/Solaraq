@@ -55,6 +55,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
     TObjectPtr<UInputAction> SecondaryUseAction;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
+    TObjectPtr<UInputAction> SprintAction;
+    
     // We now use a single action for both tapping and holding the pointer.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
     TObjectPtr<UInputAction> PointerMoveAction;
@@ -144,6 +147,8 @@ protected:
     void HandleCharacterMoveInput(const FInputActionValue& Value);
     void HandleCameraZoom(const FInputActionValue& Value);
     void MoveToDestination(const FVector& Destination);
+    void HandleSprintStarted(const FInputActionValue& Value);
+    void HandleSprintCompleted(const FInputActionValue& Value);
     
 private:
     // No longer need specific PossessedCharacterPawn, GetControlledCharacter() will cast GetPawn()

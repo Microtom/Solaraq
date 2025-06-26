@@ -201,6 +201,20 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
     {
         EnhancedInputComponentRef->BindAction(ToggleFishingModeAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleToggleFishingMode);
     }
+    if (SprintAction)
+    {
+        // Bind the "Started" event (key press) to the start sprinting function
+        EnhancedInputComponentRef->BindAction(SprintAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleSprintStarted);
+        
+        // Bind the "Completed" event (key release) to the stop sprinting function
+        EnhancedInputComponentRef->BindAction(SprintAction, ETriggerEvent::Completed, this, &ASolaraqCharacterPlayerController::HandleSprintCompleted);
+
+        UE_LOG(LogSolaraqMovement, Log, TEXT("CharacterPC: Bound SprintAction successfully."));
+    }
+    else
+    {
+        UE_LOG(LogSolaraqMovement, Warning, TEXT("CharacterPC: SprintAction is NOT assigned! Sprinting will not work."));
+    }
 }
 
 void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
@@ -525,5 +539,37 @@ void ASolaraqCharacterPlayerController::MoveToDestination(const FVector& Destina
         {
             UAIBlueprintHelperLibrary::SimpleMoveToLocation(this, Destination);
         }
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandleSprintStarted(const FInputActionValue& Value)
+{
+    UE_LOG(LogSolaraqMovement, Warning, TEXT("CharacterPC %s: HandleSprintStarted CALLED."), *GetNameSafe(this));
+    
+    ASolaraqCharacterPawn* CharacterPawn = GetControlledCharacter();
+    if (CharacterPawn)
+    {
+        UE_LOG(LogSolaraqMovement, Warning, TEXT("  -> Pawn %s is VALID. Calling StartSprinting()."), *GetNameSafe(CharacterPawn));
+        CharacterPawn->StartSprinting();
+    }
+    else
+    {
+        UE_LOG(LogSolaraqMovement, Error, TEXT("  -> GetControlledCharacter() is NULL! Cannot start sprinting."), *GetNameSafe(this));
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandleSprintCompleted(const FInputActionValue& Value)
+{
+    UE_LOG(LogSolaraqMovement, Warning, TEXT("CharacterPC %s: HandleSprintCompleted CALLED."), *GetNameSafe(this));
+
+    ASolaraqCharacterPawn* CharacterPawn = GetControlledCharacter();
+    if (CharacterPawn)
+    {
+        UE_LOG(LogSolaraqMovement, Warning, TEXT("  -> Pawn %s is VALID. Calling StopSprinting()."), *GetNameSafe(CharacterPawn));
+        CharacterPawn->StopSprinting();
+    }
+    else
+    {
+        UE_LOG(LogSolaraqMovement, Error, TEXT("  -> GetControlledCharacter() is NULL! Cannot stop sprinting."), *GetNameSafe(this));
     }
 }
