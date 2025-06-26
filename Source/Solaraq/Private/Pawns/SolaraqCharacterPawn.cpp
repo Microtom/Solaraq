@@ -10,6 +10,7 @@
 #include "DrawDebugHelpers.h"
 #include "Components/EquipmentComponent.h"
 #include "Items/InventoryComponent.h"
+#include "Net/UnrealNetwork.h"
 #include "Items/ItemToolDataAsset.h"
 #include "Logging/SolaraqLogChannels.h" // Your log channels
 #include "Systems/FishingSubsystem.h"
@@ -52,6 +53,8 @@ ASolaraqCharacterPawn::ASolaraqCharacterPawn()
     // Create an inventory component
     InventoryComponent = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
     EquipmentComponent = CreateDefaultSubobject<UEquipmentComponent>(TEXT("EquipmentComponent"));
+
+    NormalMaxWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
     
     // Set a default mesh (UE Mannequin)
     // You might need to adjust the path depending on your engine version or if you have custom content
@@ -147,6 +150,18 @@ void ASolaraqCharacterPawn::SetContinuousAiming(bool bEnable)
     }
 }
 
+void ASolaraqCharacterPawn::StartSprinting()
+{
+    UE_LOG(LogSolaraqMovement, Warning, TEXT("StartSprinting() CALLED. Sending RPC to server..."));
+    Server_SetSprinting(true);
+}
+
+void ASolaraqCharacterPawn::StopSprinting()
+{
+    UE_LOG(LogSolaraqMovement, Warning, TEXT("StopSprinting() CALLED. Sending RPC to server..."));
+    Server_SetSprinting(false);
+}
+
 void ASolaraqCharacterPawn::BeginPlay()
 {
     Super::BeginPlay();
@@ -161,6 +176,34 @@ void ASolaraqCharacterPawn::BeginPlay()
             EquipmentComponent->EquipItem(RodData);
             UE_LOG(LogTemp, Warning, TEXT("TEST: Gave player a fishing rod."));
         }
+    }
+}
+
+void ASolaraqCharacterPawn::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ASolaraqCharacterPawn, bIsSprinting);
+}
+
+void ASolaraqCharacterPawn::OnRep_IsSprinting()
+{
+    if (bIsSprinting)
+    {
+        GetCharacterMovement()->MaxWalkSpeed = SprintMaxWalkSpeed;
+    }
+    else
+    {
+        GetCharacterMovement()->MaxWalkSpeed = NormalMaxWalkSpeed;
+    }
+}
+
+void ASolaraqCharacterPawn::Server_SetSprinting_Implementation(bool bNewSprintingState)
+{
+    if (bIsSprinting != bNewSprintingState)
+    {
+        bIsSprinting = bNewSprintingState;
+        // Call OnRep on the server for immediate effect (for host/listen server)
+        OnRep_IsSprinting();
     }
 }
 

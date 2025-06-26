@@ -39,10 +39,34 @@ public:
 	FRotator GetTargetAimingRotation() const;
 	void StartSmoothTurn(const FRotator& TargetRotation);
 	void SetContinuousAiming(bool bEnable);
+
+	// --- Sprinting ---
+	/** Call this from your PlayerController to start sprinting. */
+	void StartSprinting();
+	/** Call this from your PlayerController to stop sprinting. */
+	void StopSprinting();
 	
 protected:
 	virtual void BeginPlay() override;
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	// --- Sprinting ---
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sprinting")
+	float NormalMaxWalkSpeed;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sprinting")
+	float SprintMaxWalkSpeed = 800.f;
+
+	UPROPERTY(ReplicatedUsing=OnRep_IsSprinting)
+	bool bIsSprinting = false;
+
+	UFUNCTION()
+	void OnRep_IsSprinting();
+
+	UFUNCTION(Server, Reliable)
+	void Server_SetSprinting(bool bNewSprintingState);
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<USpringArmComponent> SpringArmComponent;
 

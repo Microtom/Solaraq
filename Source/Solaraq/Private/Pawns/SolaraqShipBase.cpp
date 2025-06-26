@@ -18,10 +18,10 @@
 #include "Projectiles/SolaraqProjectile.h"
 #include "Components/DockingPadComponent.h" // Include for docking logic
 #include "TimerManager.h" // For potential future timed sequences
-#include "Controllers/SolaraqPlayerController.h"
 #include "Core/SolaraqGameInstance.h"
 #include "Engine/DamageEvents.h"
 #include "DrawDebugHelpers.h"
+#include "Controllers/SolaraqBasePlayerController.h"
 #include "Engine/World.h" 
 
 // Simple Logging Helper Macro
@@ -772,16 +772,46 @@ void ASolaraqShipBase::Tick(float DeltaTime)
         // ... (existing boost logic, make sure it checks !IsShipDockedOrDocking() and !bIsLerpingToDockPosition) ...
         if (!IsShipDockedOrDocking() && !bIsLerpingToDockPosition) // Cannot boost if docked or lerping
         {
-            // ... (boost energy drain/regen) ...
+            const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+
+            // --- BOOST LOGIC ---
+            if (bIsAttemptingBoostInput && CurrentEnergy > 0.f)
+            {
+                if (!bIsBoosting)
+                {
+                    bIsBoosting = true;
+                }
+                CurrentEnergy = FMath::Max(0.f, CurrentEnergy - EnergyDrainRate * DeltaTime);
+                LastBoostStopTime = CurrentTime; // Keep updating to prevent regen from starting
+            }
+            else
+            {
+                if (bIsBoosting)
+                {
+                    bIsBoosting = false;
+                    LastBoostStopTime = CurrentTime; // Set stop time when boost actually ends
+                }
+
+                // --- REGEN LOGIC ---
+                if (CurrentEnergy < MaxEnergy)
+                {
+                    // Check if the regen delay has passed
+                    bool bCanRegen = (LastBoostStopTime < 0.f) || (CurrentTime >= LastBoostStopTime + EnergyRegenDelay);
+                    if (bCanRegen)
+                    {
+                        CurrentEnergy = FMath::Min(MaxEnergy, CurrentEnergy + EnergyRegenRate * DeltaTime);
+                    }
+                }
+            }
         }
         else // If docked or lerping, ensure boosting is off
         {
-             if (bIsBoosting || bIsAttemptingBoostInput)
-             {
-                 bIsAttemptingBoostInput = false; 
-                 bIsBoosting = false; 
-                 LastBoostStopTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
-             }
+            if (bIsBoosting || bIsAttemptingBoostInput)
+            {
+                bIsAttemptingBoostInput = false; 
+                bIsBoosting = false; 
+                LastBoostStopTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+            }
         }
         
         // ... (existing velocity clamping logic) ...
