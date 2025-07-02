@@ -95,6 +95,7 @@ protected:
     void HandleFireMiningLaserCompleted(const FInputActionValue& Value);
     void HandleAimLaserTriggered(const FInputActionValue& Value);
     void HandleAimLaserCompleted(const FInputActionValue& Value);
+    void HandleShipToggleInventory(); 
     
 private:
     // --- Homing Lock System ---
@@ -147,6 +148,13 @@ private:
     float CurrentLaserRelativeAimYaw = 0.0f;
     FVector2D LastAimLaserInputValue = FVector2D::ZeroVector; // Stores current mouse input for aiming
 
+    /** Widget class to use for the SHIP's inventory screen. */
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
+    TSubclassOf<UUserWidget> ShipInventoryWidgetClass;
+
+    /** Runtime instance of the ship inventory widget. */
+    UPROPERTY()
+    TObjectPtr<UUserWidget> ShipInventoryWidgetInstance;
     
     void UpdatePotentialTargets();
     void UpdateTargetWidgets();

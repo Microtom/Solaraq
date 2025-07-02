@@ -20,7 +20,10 @@ public class Solaraq : ModuleRules
 			"Niagara",
 			"ProceduralMeshComponent",
 			"NavigationSystem",
-			"AIModule"
+			"AIModule",
+			"UMG",             // Add this
+			"Slate",           // Add this
+			"SlateCore"  
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

@@ -302,6 +302,15 @@ void ASolaraqShipPlayerController::SetupInputComponent()
     } else {
         UE_LOG(LogSolaraqTransition, Error, TEXT("ASolaraqShipPlayerController %s: SetupInputComponent - InteractAction IS NULL! Cannot bind HandleShipInteractInput."), *GetNameSafe(this));
     }
+    if (ToggleInventoryAction)
+    {
+        EnhancedInputComponentRef->BindAction(ToggleInventoryAction, ETriggerEvent::Started, this, &ASolaraqShipPlayerController::HandleShipToggleInventory);
+        UE_LOG(LogSolaraqSystem, Log, TEXT("ShipPC: Bound ToggleInventoryAction successfully."));
+    }
+    else
+    {
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("ShipPC: ToggleInventoryAction is NOT assigned! Ship inventory will not open."));
+    }
 }
 
 void ASolaraqShipPlayerController::Tick(float DeltaTime)
@@ -454,6 +463,40 @@ void ASolaraqShipPlayerController::HandleAimLaserTriggered(const FInputActionVal
 void ASolaraqShipPlayerController::HandleAimLaserCompleted(const FInputActionValue& Value)
 {
     LastAimLaserInputValue = FVector2D::ZeroVector;
+}
+
+void ASolaraqShipPlayerController::HandleShipToggleInventory()
+{
+    UE_LOG(LogSolaraqSystem, Log, TEXT("Toggle SHIP Inventory input received."));
+
+    // Check if the widget is already created and visible
+    if (ShipInventoryWidgetInstance && ShipInventoryWidgetInstance->IsInViewport())
+    {
+        // It's visible, so let's remove it.
+        UE_LOG(LogSolaraqSystem, Log, TEXT("Ship Inventory is visible. Hiding it."));
+        ShipInventoryWidgetInstance->RemoveFromParent();
+        ShipInventoryWidgetInstance = nullptr; // Null the pointer
+    }
+    else
+    {
+        // It's not visible, so let's create and show it.
+        UE_LOG(LogSolaraqSystem, Log, TEXT("Ship Inventory is hidden. Showing it."));
+        if (!ShipInventoryWidgetClass)
+        {
+            UE_LOG(LogSolaraqSystem, Error, TEXT("ShipInventoryWidgetClass is not set in the Ship PlayerController Blueprint! Cannot create inventory UI."));
+            return;
+        }
+
+        if (!ShipInventoryWidgetInstance)
+        {
+            ShipInventoryWidgetInstance = CreateWidget<UUserWidget>(this, ShipInventoryWidgetClass);
+        }
+
+        if (ShipInventoryWidgetInstance)
+        {
+            ShipInventoryWidgetInstance->AddToViewport();
+        }
+    }
 }
 
 

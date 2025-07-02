@@ -14,6 +14,8 @@
 #include "Kismet/GameplayStatics.h" // For OpenLevel
 #include "Logging/SolaraqLogChannels.h"
 #include "Systems/FishingSubsystem.h"
+#include "UI/Inventory/SolaraqInventoryWindowWidget.h"
+#include "UI/Inventory/SolaraqInventoryGridWidget.h"
 
 ASolaraqCharacterPlayerController::ASolaraqCharacterPlayerController()
 {
@@ -214,6 +216,16 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
     else
     {
         UE_LOG(LogSolaraqMovement, Warning, TEXT("CharacterPC: SprintAction is NOT assigned! Sprinting will not work."));
+    }
+    if (ToggleInventoryAction)
+    {
+        // The name of the handler function has changed for clarity
+        EnhancedInputComponentRef->BindAction(ToggleInventoryAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleCharacterToggleInventory);
+        UE_LOG(LogSolaraqSystem, Log, TEXT("CharacterPC: Bound ToggleInventoryAction successfully."));
+    }
+    else
+    {
+        UE_LOG(LogSolaraqSystem, Warning, TEXT("CharacterPC: ToggleInventoryAction is NOT assigned! Inventory will not open."));
     }
 }
 
@@ -505,6 +517,39 @@ void ASolaraqCharacterPlayerController::HandleToggleFishingMode()
     if (UFishingSubsystem* FishingSubsystem = GetWorld()->GetSubsystem<UFishingSubsystem>())
     {
         FishingSubsystem->RequestToggleFishingMode(GetControlledCharacter());
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandleCharacterToggleInventory()
+{
+    UE_LOG(LogSolaraqSystem, Log, TEXT("Toggle CHARACTER Inventory input received."));
+
+    // Check if the widget is already created and visible
+    if (CharacterInventoryWidgetInstance && CharacterInventoryWidgetInstance->IsInViewport())
+    {
+        UE_LOG(LogSolaraqSystem, Log, TEXT("Character Inventory Window is visible. Hiding it."));
+        CharacterInventoryWidgetInstance->RemoveFromParent();
+        CharacterInventoryWidgetInstance = nullptr;
+    }
+    else
+    {
+        UE_LOG(LogSolaraqSystem, Log, TEXT("Character Inventory Window is hidden. Showing it."));
+        if (!CharacterInventoryWidgetClass)
+        {
+            UE_LOG(LogSolaraqSystem, Error, TEXT("CharacterInventoryWidgetClass is not set in the PlayerController Blueprint! Cannot create inventory UI."));
+            return;
+        }
+
+        if (!CharacterInventoryWidgetInstance)
+        {
+            // This now correctly creates an instance of our window widget.
+            CharacterInventoryWidgetInstance = CreateWidget<USolaraqInventoryWindowWidget>(this, CharacterInventoryWidgetClass);
+        }
+
+        if (CharacterInventoryWidgetInstance)
+        {
+            CharacterInventoryWidgetInstance->AddToViewport();
+        }
     }
 }
 

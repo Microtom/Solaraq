@@ -6,6 +6,7 @@
 #include "GameFramework/Pawn.h"
 #include "GenericTeamAgentInterface.h"
 #include "TimerManager.h"
+#include "Items/InventoryComponent.h"
 #include "Components/DockingPadComponent.h" // Includes EDockingStatus
 #include "SolaraqShipBase.generated.h" // Must be last include
 
@@ -138,7 +139,9 @@ public:
 	/** Public function to allow the controller (or input binding) to update the turn input state */
 	void SetTurnInputForRoll(float TurnValue);
 
-
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UInventoryComponent> InventoryComponent;
+	
 protected:
 	// --- CORE COMPONENTS ---
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components", meta = (AllowPrivateAccess = "true"))

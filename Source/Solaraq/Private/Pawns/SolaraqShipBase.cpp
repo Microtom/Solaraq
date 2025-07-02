@@ -63,6 +63,8 @@ ASolaraqShipBase::ASolaraqShipBase()
     CollisionAndPhysicsRoot->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
     CollisionAndPhysicsRoot->SetNotifyRigidBodyCollision(true);
 
+    InventoryComponent = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
+    
     if (FBodyInstance* BodyInst = CollisionAndPhysicsRoot->GetBodyInstance())
     {
         BodyInst->bLockZTranslation = true;

@@ -55,4 +55,9 @@ public:
 	// The maximum number of items in a single stack. Ignored if bIsStackable is false.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Stacking", meta = (EditCondition = "bIsStackable", ClampMin = "1"))
 	int32 MaxStackSize = 100;
+
+	// The dimensions of the item in inventory slots (Width, Height).
+	// A 1x1 item is the default. A sword might be 1x3, a helmet 2x2.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory")
+	FIntPoint Dimensions = FIntPoint(1, 1);
 };

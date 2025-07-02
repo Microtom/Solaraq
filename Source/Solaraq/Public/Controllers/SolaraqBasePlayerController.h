@@ -74,6 +74,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Shared")
     TObjectPtr<UInputAction> InteractAction;
 
+    // Shared action for toggling inventory screens.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Shared")
+    TObjectPtr<UInputAction> ToggleInventoryAction;
 public:
     // --- Enhanced Input System Utilities ---
     // Clears all mapping contexts from the subsystem. Use with caution.

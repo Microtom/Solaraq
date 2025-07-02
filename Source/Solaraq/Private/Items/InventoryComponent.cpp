@@ -11,6 +11,49 @@
 UInventoryComponent::UInventoryComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
+
+    InventoryWidth = 5;  
+    InventoryHeight = 7;
+}
+
+bool UInventoryComponent::MoveItem(const FGuid& ItemID, FIntPoint NewTopLeft)
+{
+    // Find the item by its ID
+    FPlacedItem* ItemToMove = PlacedItems.FindByPredicate([&ItemID](const FPlacedItem& Item) {
+        return Item.ItemID == ItemID;
+    });
+
+    if (!ItemToMove)
+    {
+        // Item not found
+        return false;
+    }
+
+    // --- Check if the target space is free ---
+    // This is tricky: we need to check if the area is free *excluding the item we are currently moving*.
+    // A simple way to do this is to temporarily remove the item, check, and then add it back.
+    
+    FPlacedItem CopyOfItem = *ItemToMove; // Make a copy
+    int32 OriginalIndex = PlacedItems.Find(*ItemToMove);
+    PlacedItems.RemoveAt(OriginalIndex); // Temporarily remove it
+
+    bool bSpaceIsFree = IsAreaFree(NewTopLeft, CopyOfItem.ItemData->Dimensions);
+
+    if (bSpaceIsFree)
+    {
+        // Success! The space is free. Update the item's position and add it back.
+        CopyOfItem.TopLeft = NewTopLeft;
+        PlacedItems.Emplace(CopyOfItem);
+        OnInventoryUpdated.Broadcast(); // Notify the UI to refresh
+        return true;
+    }
+    else
+    {
+        // Failure. The space is occupied. Add the original item back to its old spot.
+        PlacedItems.Insert(CopyOfItem, OriginalIndex);
+        // No need to broadcast, as nothing actually changed.
+        return false;
+    }
 }
 
 void UInventoryComponent::BeginPlay()
@@ -20,69 +63,108 @@ void UInventoryComponent::BeginPlay()
     // For now, it will be dynamic.
 }
 
-int32 UInventoryComponent::AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity)
+bool UInventoryComponent::IsAreaFree(FIntPoint TopLeft, FIntPoint Dimensions) const
 {
-    if (!ItemToAdd || Quantity <= 0)
+    // The rectangle for the item we want to place.
+    const FIntRect NewItemRect = FIntRect(TopLeft, TopLeft + Dimensions);
+
+    // Check against inventory bounds first.
+    if (NewItemRect.Min.X < 0 || NewItemRect.Min.Y < 0 ||
+        NewItemRect.Max.X > InventoryWidth || NewItemRect.Max.Y > InventoryHeight)
     {
-        return Quantity; // Return original quantity if item or quantity is invalid
+        return false;
     }
 
-    int32 QuantityRemaining = Quantity;
-
-    // 1. If the item is stackable, try to add to existing stacks first.
-    if (ItemToAdd->bIsStackable)
+    // Check for overlap with all already placed items.
+    for (const FPlacedItem& PlacedItem : PlacedItems)
     {
-        for (FInventorySlot& Slot : Items)
+        FIntRect ExistingItemRect = FIntRect(PlacedItem.TopLeft, PlacedItem.TopLeft + PlacedItem.ItemData->Dimensions);
+        if (NewItemRect.Intersect(ExistingItemRect))
         {
-            if (!Slot.IsEmpty() && Slot.ItemData == ItemToAdd)
-            {
-                int32 SpaceInStack = ItemToAdd->MaxStackSize - Slot.Quantity;
-                if (SpaceInStack > 0)
-                {
-                    int32 AmountToAdd = FMath::Min(QuantityRemaining, SpaceInStack);
-                    Slot.Quantity += AmountToAdd;
-                    QuantityRemaining -= AmountToAdd;
+            return false; // Found an overlap!
+        }
+    }
+    
+    return true; // No overlaps found, the area is free.
+}
 
-                    if (QuantityRemaining <= 0)
-                    {
-                        OnInventoryUpdated.Broadcast();
-                        return 0; // All items added
-                    }
-                }
+bool UInventoryComponent::FindFreeSpot(FIntPoint Dimensions, FIntPoint& OutTopLeft) const
+{
+    // Iterate through every possible top-left cell.
+    for (int32 y = 0; y <= InventoryHeight - Dimensions.Y; ++y)
+    {
+        for (int32 x = 0; x <= InventoryWidth - Dimensions.X; ++x)
+        {
+            FIntPoint CurrentTopLeft(x, y);
+            if (IsAreaFree(CurrentTopLeft, Dimensions))
+            {
+                OutTopLeft = CurrentTopLeft;
+                return true; // Found a spot!
             }
         }
     }
 
-    // 2. Add remaining quantity to new slots.
+    return false; // No free spot of the required size was found.
+}
+
+int32 UInventoryComponent::AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity)
+{
+    if (!ItemToAdd || Quantity <= 0)
+    {
+        return Quantity;
+    }
+
+    int32 QuantityRemaining = Quantity;
+
+    // 1. Try to stack on existing items first.
+    if (ItemToAdd->bIsStackable)
+    {
+        for (FPlacedItem& Item : PlacedItems)
+        {
+            if (Item.ItemData == ItemToAdd && Item.Quantity < ItemToAdd->MaxStackSize)
+            {
+                int32 SpaceInStack = ItemToAdd->MaxStackSize - Item.Quantity;
+                int32 AmountToAdd = FMath::Min(QuantityRemaining, SpaceInStack);
+                Item.Quantity += AmountToAdd;
+                QuantityRemaining -= AmountToAdd;
+
+                if (QuantityRemaining <= 0)
+                {
+                    OnInventoryUpdated.Broadcast();
+                    return 0; // All items stacked.
+                }
+            }
+        }
+    }
+    
+    // 2. Place remaining quantity into new slots.
+    FIntPoint ItemDimensions = ItemToAdd->Dimensions;
     while (QuantityRemaining > 0)
     {
-        FInventorySlot* EmptySlot = Items.FindByPredicate([](const FInventorySlot& Slot) {
-            return Slot.IsEmpty();
-        });
-
-        if (EmptySlot) // Found an existing, but empty, slot
+        FIntPoint FoundSpot;
+        if (FindFreeSpot(ItemDimensions, FoundSpot))
         {
-            EmptySlot->ItemData = ItemToAdd;
+            // We found a free spot. Place the item.
             int32 AmountToAdd = ItemToAdd->bIsStackable ? FMath::Min(QuantityRemaining, ItemToAdd->MaxStackSize) : 1;
-            EmptySlot->Quantity = AmountToAdd;
+            
+            PlacedItems.Emplace(ItemToAdd, AmountToAdd, FoundSpot);
             QuantityRemaining -= AmountToAdd;
-        }
-        else // No empty slots, add a new one to the array
-        {
-            int32 AmountToAdd = ItemToAdd->bIsStackable ? FMath::Min(QuantityRemaining, ItemToAdd->MaxStackSize) : 1;
-            Items.Emplace(ItemToAdd, AmountToAdd);
-            QuantityRemaining -= AmountToAdd;
-        }
 
-        // If the item isn't stackable, we add one and loop again for the remaining quantity
-        if (!ItemToAdd->bIsStackable && QuantityRemaining > 0)
+            // For non-stackable items, we must loop again to place the next one.
+            if (!ItemToAdd->bIsStackable && QuantityRemaining > 0)
+            {
+                continue;
+            }
+        }
+        else
         {
-             continue;
+            // No more room in the inventory for an item of this size.
+            break;
         }
     }
 
     OnInventoryUpdated.Broadcast();
-    return QuantityRemaining; // Should be 0 if all was added
+    return QuantityRemaining; // Return any un-added quantity.
 }
 
 void UInventoryComponent::UseItem(int32 SlotIndex)
@@ -209,4 +291,19 @@ bool UInventoryComponent::HasItem(UItemDataAssetBase* ItemToFind, int32 Quantity
     }
 
     return TotalFound >= Quantity;
+}
+
+int32 UInventoryComponent::GetGridWidth() const
+{
+    return InventoryWidth;
+}
+
+int32 UInventoryComponent::GetGridHeight() const
+{
+    return InventoryHeight;
+}
+
+const TArray<FPlacedItem>& UInventoryComponent::GetPlacedItems() const
+{
+    return PlacedItems;
 }

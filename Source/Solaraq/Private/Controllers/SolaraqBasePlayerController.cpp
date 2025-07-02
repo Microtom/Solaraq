@@ -52,7 +52,8 @@ void ASolaraqBasePlayerController::SetupInputComponent()
         UE_LOG(LogSolaraqSystem, Error, TEXT("ASolaraqBasePlayerController (%s): Failed to cast InputComponent to UEnhancedInputComponent! Enhanced Input bindings will fail in derived classes."), *GetName());
         return;
     }
-    // Actual action bindings are performed in derived classes.
+    
+    
 }
 
 void ASolaraqBasePlayerController::Tick(float DeltaTime)

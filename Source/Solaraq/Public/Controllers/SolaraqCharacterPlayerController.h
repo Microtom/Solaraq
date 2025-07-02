@@ -7,6 +7,7 @@
 #include "Pawns/SolaraqCharacterPawn.h"
 #include "SolaraqCharacterPlayerController.generated.h"
 
+class USolaraqInventoryWindowWidget;
 struct FInputActionValue;
 // Forward Declarations
 class UInputMappingContext;
@@ -68,25 +69,25 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
     TObjectPtr<UInputAction> ToggleFishingModeAction;
     
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Camera")
     TObjectPtr<UCurveFloat> CameraZoomCurve;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Camera")
     float MinZoomLength = 300.f;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Camera")
     float MaxZoomLength = 2000.f;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Camera")
     float FishingModeZoomLength = 1700.f;
     
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Camera")
     float ZoomStepAmount = 100.f; // How much each mouse wheel tick changes the target zoom
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Camera")
     float ZoomInterpSpeed = 5.f; // How smoothly the camera zooms in/out
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Camera")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Camera")
     float RotationInterpSpeed = 5.f; // How smoothly the camera rotates to match the zoom
 
     FVector TargetCameraOffset;
@@ -129,12 +130,20 @@ protected:
     float DelayBeforeForcedRejoin = 0.25f;
     
     /** The class of the fishing HUD widget to create. Assign this in the PlayerController Blueprint. */
-    UPROPERTY(EditDefaultsOnly, Category = "UI")
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
     TSubclassOf<UUserWidget> FishingHUDWidgetClass;
 
     /** A pointer to the instance of the fishing HUD, so we can show/hide it. */
     UPROPERTY()
     TObjectPtr<UUserWidget> FishingHUDWidgetInstance;
+
+    /** Widget class for the CHARACTER's inventory grid. */
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
+    TSubclassOf<USolaraqInventoryWindowWidget> CharacterInventoryWidgetClass;
+
+    /** Instance of the character inventory grid widget. */
+    UPROPERTY()
+    TObjectPtr<USolaraqInventoryWindowWidget> CharacterInventoryWidgetInstance;
     
     // --- Input Handling Functions (Character & Shared Handlers) ---
     void HandlePointerMove(const FInputActionValue& Value);
@@ -144,6 +153,7 @@ protected:
     void HandleSecondaryUseStarted();
     void HandleSecondaryUseCompleted();
     void HandleToggleFishingMode();
+    void HandleCharacterToggleInventory();
     void HandleCharacterMoveInput(const FInputActionValue& Value);
     void HandleCameraZoom(const FInputActionValue& Value);
     void MoveToDestination(const FVector& Destination);
