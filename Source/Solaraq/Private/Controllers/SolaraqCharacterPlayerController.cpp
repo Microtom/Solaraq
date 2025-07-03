@@ -9,11 +9,14 @@
 #include "NavigationSystem.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Blueprint/UserWidget.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Core/SolaraqGameInstance.h" // For level transition
 #include "GameFramework/SpringArmComponent.h"
 #include "Kismet/GameplayStatics.h" // For OpenLevel
 #include "Logging/SolaraqLogChannels.h"
 #include "Systems/FishingSubsystem.h"
+#include "UI/SolaraqHUDWidget.h"
 #include "UI/Inventory/SolaraqInventoryWindowWidget.h"
 #include "UI/Inventory/SolaraqInventoryGridWidget.h"
 
@@ -81,10 +84,43 @@ void ASolaraqCharacterPlayerController::ApplyCharacterInputMappingContext()
     }
 }
 
+void ASolaraqCharacterPlayerController::CreateHUD()
+{
+    // If it already exists, do nothing.
+    if (MainHUDWidgetInstance)
+    {
+        return;
+    }
+
+    // Check if the class was set in the blueprint editor. This is a critical check.
+    if (!MainHUDWidgetClass)
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("CreateHUD FAILED: MainHUDWidgetClass is not set in the PlayerController Blueprint!"));
+        return;
+    }
+
+    UE_LOG(LogSolaraqSystem, Log, TEXT("CreateHUD: Attempting to create widget of class %s."), *MainHUDWidgetClass->GetName());
+	
+    // Create the widget.
+    MainHUDWidgetInstance = CreateWidget<USolaraqHUDWidget>(this, MainHUDWidgetClass);
+
+    // Check if creation was successful.
+    if (MainHUDWidgetInstance)
+    {
+        UE_LOG(LogSolaraqSystem, Log, TEXT("CreateHUD: Widget created successfully. Adding to viewport."));
+        // Add it to the viewport. This is the step that makes it visible.
+        MainHUDWidgetInstance->AddToViewport();
+    }
+    else
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("CreateHUD FAILED: CreateWidget returned NULL."));
+    }
+}
+
 void ASolaraqCharacterPlayerController::BeginPlay()
 {
     Super::BeginPlay();
-
+    
     FInputModeGameAndUI InputModeData;
     InputModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
     InputModeData.SetHideCursorDuringCapture(false);
@@ -102,7 +138,11 @@ void ASolaraqCharacterPlayerController::OnPossess(APawn* InPawn)
 
     ASolaraqCharacterPawn* PossessedChar = Cast<ASolaraqCharacterPawn>(InPawn);
     FString AuthorityPrefix = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
-    
+
+    if (IsLocalPlayerController())
+    {
+        CreateHUD();
+    }
     
     if (PossessedChar)
     {
@@ -132,6 +172,12 @@ void ASolaraqCharacterPlayerController::OnPossess(APawn* InPawn)
 
 void ASolaraqCharacterPlayerController::OnUnPossess()
 {
+    if (MainHUDWidgetInstance)
+    {
+        MainHUDWidgetInstance->RemoveFromParent();
+        MainHUDWidgetInstance = nullptr;
+    }
+    
     FString AuthorityPrefix = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
     APawn* UnpossessedPawn = GetPawn(); // Get pawn before Super::OnUnPossess clears it internally
     UE_LOG(LogSolaraqMovement, Log, TEXT("%s ASolaraqCharacterPlayerController (%s): OnUnPossess - Unpossessing: %s."),
@@ -522,33 +568,67 @@ void ASolaraqCharacterPlayerController::HandleToggleFishingMode()
 
 void ASolaraqCharacterPlayerController::HandleCharacterToggleInventory()
 {
-    UE_LOG(LogSolaraqSystem, Log, TEXT("Toggle CHARACTER Inventory input received."));
-
-    // Check if the widget is already created and visible
-    if (CharacterInventoryWidgetInstance && CharacterInventoryWidgetInstance->IsInViewport())
+    UE_LOG(LogSolaraqSystem, Log, TEXT("HandleCharacterToggleInventory CALLED."));
+	
+    if (CharacterInventoryWidgetInstance)
     {
-        UE_LOG(LogSolaraqSystem, Log, TEXT("Character Inventory Window is visible. Hiding it."));
+        UE_LOG(LogSolaraqSystem, Log, TEXT("  > Hiding inventory."));
+        
+        // Save position before removing
+        if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(CharacterInventoryWidgetInstance->Slot))
+        {
+            LastInventoryPosition = CanvasSlot->GetPosition();
+            bIsInventoryPositionSet = true;
+        }
+
         CharacterInventoryWidgetInstance->RemoveFromParent();
         CharacterInventoryWidgetInstance = nullptr;
+
+        // We are already in GameAndUI mode, but we can re-assert it if needed.
+        // For now, we don't even need to change the input mode when closing.
+        // We can optionally hide the cursor if nothing else needs it, but for an MMO-style
+        // game, keeping it visible is often desired.
+        // SetShowMouseCursor(false); // Optional: if you want the cursor to hide.
     }
     else
     {
-        UE_LOG(LogSolaraqSystem, Log, TEXT("Character Inventory Window is hidden. Showing it."));
-        if (!CharacterInventoryWidgetClass)
-        {
-            UE_LOG(LogSolaraqSystem, Error, TEXT("CharacterInventoryWidgetClass is not set in the PlayerController Blueprint! Cannot create inventory UI."));
-            return;
-        }
+        UE_LOG(LogSolaraqSystem, Log, TEXT("  > Showing inventory."));
+        
+        if (!CharacterInventoryWidgetClass) { /* ... error log ... */ return; }
+        if (!MainHUDWidgetInstance || !MainHUDWidgetInstance->GetMainCanvas()) { /* ... error log ... */ return; }
 
-        if (!CharacterInventoryWidgetInstance)
-        {
-            // This now correctly creates an instance of our window widget.
-            CharacterInventoryWidgetInstance = CreateWidget<USolaraqInventoryWindowWidget>(this, CharacterInventoryWidgetClass);
-        }
-
+        CharacterInventoryWidgetInstance = CreateWidget<USolaraqInventoryWindowWidget>(this, CharacterInventoryWidgetClass);
         if (CharacterInventoryWidgetInstance)
         {
-            CharacterInventoryWidgetInstance->AddToViewport();
+            MainHUDWidgetInstance->GetMainCanvas()->AddChildToCanvas(CharacterInventoryWidgetInstance);
+            
+            if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(CharacterInventoryWidgetInstance->Slot))
+            {
+                if (bIsInventoryPositionSet)
+                {
+                    CanvasSlot->SetPosition(LastInventoryPosition);
+                }
+                else
+                {
+                    CanvasSlot->SetAnchors(FAnchors(0.5f));
+                    CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+                    CanvasSlot->SetPosition(FVector2D(0, 0));
+                }
+                CanvasSlot->SetAutoSize(true);
+            }
+
+            // --- THIS IS THE KEY CHANGE ---
+            // We set the input mode to GameAndUI. This allows both UI clicks and game input to be processed.
+            FInputModeGameAndUI InputModeData;
+            
+            // We DO NOT set a widget to focus. This allows game input to continue unimpeded.
+            // InputModeData.SetWidgetToFocus(...) is removed.
+            
+            InputModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+            InputModeData.SetHideCursorDuringCapture(false);
+            
+            SetInputMode(InputModeData);
+            SetShowMouseCursor(true); // Ensure the cursor is visible for UI interaction.
         }
     }
 }

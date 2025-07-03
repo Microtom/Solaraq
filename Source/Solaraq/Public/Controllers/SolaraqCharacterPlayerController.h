@@ -7,6 +7,7 @@
 #include "Pawns/SolaraqCharacterPawn.h"
 #include "SolaraqCharacterPlayerController.generated.h"
 
+class USolaraqHUDWidget;
 class USolaraqInventoryWindowWidget;
 struct FInputActionValue;
 // Forward Declarations
@@ -41,6 +42,14 @@ protected:
     virtual void OnRep_Pawn() override;
     //~ End ASolaraqBasePlayerController Interface
 
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
+    TSubclassOf<USolaraqHUDWidget> MainHUDWidgetClass;
+
+    UPROPERTY(Transient) // Good practice to mark runtime-only instances as Transient
+    TObjectPtr<USolaraqHUDWidget> MainHUDWidgetInstance;
+    
+    
     // --- Input Assets ---
     /** Input Mapping Context for Character Controls */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
@@ -177,7 +186,16 @@ private:
     float TimeAtMaxOffset = 0.0f;
     FVector LastMovementDirection = FVector::ZeroVector;
     FVector DirectionWhenForcedRejoinStarted = FVector::ZeroVector;
+
+    // --- Inventory Window State Management ---
+
+    /** The last known position of the inventory window, to be persisted across toggles. */
+    FVector2D LastInventoryPosition;
+
+    /** Flag to check if we have a custom position saved, or if we should use the default centered position. */
+    bool bIsInventoryPositionSet = false;
     
+    void CreateHUD();
 	
     bool bIsMaxOffsetReached = false;        // True if current offset is at/near max
 };
