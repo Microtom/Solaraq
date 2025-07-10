@@ -23,34 +23,38 @@ bool UInventoryComponent::MoveItem(const FGuid& ItemID, FIntPoint NewTopLeft)
         return Item.ItemID == ItemID;
     });
 
-    if (!ItemToMove)
+    if (!ItemToMove || !ItemToMove->ItemData)
     {
-        // Item not found
+        UE_LOG(LogTemp, Warning, TEXT("MoveItem failed: Could not find item with ID %s"), *ItemID.ToString());
         return false;
     }
 
     // --- Check if the target space is free ---
-    // This is tricky: we need to check if the area is free *excluding the item we are currently moving*.
-    // A simple way to do this is to temporarily remove the item, check, and then add it back.
+    // To do this correctly, we must check for collisions *excluding the item we are currently moving*.
+    // The simplest way is to temporarily remove the item from the list, check for free space, and then add it back.
     
-    FPlacedItem CopyOfItem = *ItemToMove; // Make a copy
-    int32 OriginalIndex = PlacedItems.Find(*ItemToMove);
-    PlacedItems.RemoveAt(OriginalIndex); // Temporarily remove it
+    FPlacedItem CopyOfItem = *ItemToMove; // Make a copy of the item's data.
+    const int32 OriginalIndex = PlacedItems.Find(*ItemToMove);
+    PlacedItems.RemoveAt(OriginalIndex, 1, false); // Temporarily remove it from the array.
 
-    bool bSpaceIsFree = IsAreaFree(NewTopLeft, CopyOfItem.ItemData->Dimensions);
+    // Now, check if the desired area is free.
+    const bool bSpaceIsFree = IsAreaFree(NewTopLeft, CopyOfItem.ItemData->Dimensions);
 
     if (bSpaceIsFree)
     {
-        // Success! The space is free. Update the item's position and add it back.
+        // Success! The space is free. Update the item's position and add it back to the list.
         CopyOfItem.TopLeft = NewTopLeft;
-        PlacedItems.Emplace(CopyOfItem);
-        OnInventoryUpdated.Broadcast(); // Notify the UI to refresh
+        PlacedItems.Emplace(CopyOfItem); // Add the modified item back.
+        
+        UE_LOG(LogTemp, Log, TEXT("Moved item '%s' to %s"), *CopyOfItem.ItemData->DisplayName.ToString(), *NewTopLeft.ToString());
+        OnInventoryUpdated.Broadcast(); // Notify the UI to refresh.
         return true;
     }
     else
     {
-        // Failure. The space is occupied. Add the original item back to its old spot.
+        // Failure. The space is occupied or out of bounds. Add the original item back to where it was.
         PlacedItems.Insert(CopyOfItem, OriginalIndex);
+        UE_LOG(LogTemp, Warning, TEXT("Move failed: Target space at %s is not free."), *NewTopLeft.ToString());
         // No need to broadcast, as nothing actually changed.
         return false;
     }
@@ -62,6 +66,7 @@ void UInventoryComponent::BeginPlay()
     // You could initialize the inventory with a default size here if you want
     // For now, it will be dynamic.
 }
+
 
 bool UInventoryComponent::IsAreaFree(FIntPoint TopLeft, FIntPoint Dimensions) const
 {
@@ -123,8 +128,8 @@ int32 UInventoryComponent::AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity
         {
             if (Item.ItemData == ItemToAdd && Item.Quantity < ItemToAdd->MaxStackSize)
             {
-                int32 SpaceInStack = ItemToAdd->MaxStackSize - Item.Quantity;
-                int32 AmountToAdd = FMath::Min(QuantityRemaining, SpaceInStack);
+                const int32 SpaceInStack = ItemToAdd->MaxStackSize - Item.Quantity;
+                const int32 AmountToAdd = FMath::Min(QuantityRemaining, SpaceInStack);
                 Item.Quantity += AmountToAdd;
                 QuantityRemaining -= AmountToAdd;
 
@@ -138,14 +143,14 @@ int32 UInventoryComponent::AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity
     }
     
     // 2. Place remaining quantity into new slots.
-    FIntPoint ItemDimensions = ItemToAdd->Dimensions;
+    const FIntPoint ItemDimensions = ItemToAdd->Dimensions;
     while (QuantityRemaining > 0)
     {
         FIntPoint FoundSpot;
         if (FindFreeSpot(ItemDimensions, FoundSpot))
         {
             // We found a free spot. Place the item.
-            int32 AmountToAdd = ItemToAdd->bIsStackable ? FMath::Min(QuantityRemaining, ItemToAdd->MaxStackSize) : 1;
+            const int32 AmountToAdd = ItemToAdd->bIsStackable ? FMath::Min(QuantityRemaining, ItemToAdd->MaxStackSize) : 1;
             
             PlacedItems.Emplace(ItemToAdd, AmountToAdd, FoundSpot);
             QuantityRemaining -= AmountToAdd;
@@ -167,20 +172,25 @@ int32 UInventoryComponent::AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity
     return QuantityRemaining; // Return any un-added quantity.
 }
 
-void UInventoryComponent::UseItem(int32 SlotIndex)
+void UInventoryComponent::UseItem(const FGuid& ItemID)
 {
-    // Validate the slot index and ensure the slot is not empty
-    if (!Items.IsValidIndex(SlotIndex) || Items[SlotIndex].IsEmpty())
+    if (!ItemID.IsValid())
+	{
+		return;
+	}
+
+	// Find the item by its unique ID
+	FPlacedItem* ItemToUse = PlacedItems.FindByPredicate([&ItemID](const FPlacedItem& Item)
+	{
+		return Item.ItemID == ItemID;
+	});
+    
+    if (!ItemToUse || !ItemToUse->ItemData)
     {
         return;
     }
 
-    UItemDataAssetBase* ItemData = Items[SlotIndex].ItemData;
-    if (!ItemData)
-    {
-        return;
-    }
-
+    UItemDataAssetBase* ItemData = ItemToUse->ItemData;
     AActor* Owner = GetOwner();
     if (!Owner)
     {
@@ -216,18 +226,13 @@ void UInventoryComponent::UseItem(int32 SlotIndex)
                     UGameplayStatics::PlaySound2D(GetWorld(), ConsumableData->UseSound);
                 }
 
-                // Remove one item from the stack
-                RemoveItem(ItemData, 1);
+                // Remove one item from the stack. This will also broadcast the update.
+                RemoveItem(ItemID, 1);
             }
-                
             break;
         }
-
-        case EItemType::Tool: // Fall through
+        case EItemType::Tool:
         case EItemType::Weapon:
-           
-        
-        // Add cases for other types here
         case EItemType::Resource:
         case EItemType::Generic:
         case EItemType::QuestItem:
@@ -238,40 +243,32 @@ void UInventoryComponent::UseItem(int32 SlotIndex)
 }
 
 
-void UInventoryComponent::RemoveItem(UItemDataAssetBase* ItemToRemove, int32 Quantity)
+void UInventoryComponent::RemoveItem(const FGuid& ItemID, int32 QuantityToRemove)
 {
-    if (!ItemToRemove || Quantity <= 0)
+    if (!ItemID.IsValid() || QuantityToRemove <= 0)
     {
         return;
     }
 
-    int32 QuantityRemainingToRemove = Quantity;
-
-    // Iterate backwards so we can safely remove slots if they become empty
-    for (int32 i = Items.Num() - 1; i >= 0; --i)
+    // Find the index of the item to remove. We iterate backwards so removing is safe.
+    const int32 ItemIndex = PlacedItems.FindLastByPredicate([&ItemID](const FPlacedItem& Item)
     {
-        FInventorySlot& Slot = Items[i];
-        if (!Slot.IsEmpty() && Slot.ItemData == ItemToRemove)
+        return Item.ItemID == ItemID;
+    });
+
+    if (ItemIndex != INDEX_NONE)
+    {
+        FPlacedItem& Item = PlacedItems[ItemIndex];
+        Item.Quantity -= QuantityToRemove;
+
+        // If the stack is empty, remove the item entirely
+        if (Item.Quantity <= 0)
         {
-            int32 AmountToRemove = FMath::Min(QuantityRemainingToRemove, Slot.Quantity);
-            Slot.Quantity -= AmountToRemove;
-            QuantityRemainingToRemove -= AmountToRemove;
-
-            if (Slot.Quantity <= 0)
-            {
-                // Clear the slot
-                Slot.ItemData = nullptr;
-                Slot.Quantity = 0;
-            }
-
-            if (QuantityRemainingToRemove <= 0)
-            {
-                break; // All requested items have been removed
-            }
+            PlacedItems.RemoveAt(ItemIndex);
         }
-    }
 
-    OnInventoryUpdated.Broadcast();
+        OnInventoryUpdated.Broadcast();
+    }
 }
 
 bool UInventoryComponent::HasItem(UItemDataAssetBase* ItemToFind, int32 Quantity /*= 1*/) const
@@ -282,11 +279,11 @@ bool UInventoryComponent::HasItem(UItemDataAssetBase* ItemToFind, int32 Quantity
     }
 
     int32 TotalFound = 0;
-    for (const FInventorySlot& Slot : Items)
+    for (const FPlacedItem& Item : PlacedItems)
     {
-        if (!Slot.IsEmpty() && Slot.ItemData == ItemToFind)
+        if (Item.ItemData == ItemToFind)
         {
-            TotalFound += Slot.Quantity;
+            TotalFound += Item.Quantity;
         }
     }
 

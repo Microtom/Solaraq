@@ -28,6 +28,9 @@ public:
 	 * @param ItemInfo The struct containing all necessary data for this item icon.
 	 */
 	void Initialize(const FPlacedItem& InItemInfo);
+	FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent);
+	void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent,
+	                          UDragDropOperation*& OutOperation);
 
 protected:
 	// --- UPROPERTY Bindings ---

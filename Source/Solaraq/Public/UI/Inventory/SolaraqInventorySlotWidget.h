@@ -48,15 +48,15 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UImage> Corner_BL;
-	
+
 	// --- Blueprint-Assignable Textures ---
 	// These properties will appear in the Details panel of your WBP_InventorySlot.
 
 	// The L-shaped corner piece with two borders.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Solaraq|Appearance")
 	TObjectPtr<UTexture2D> CornerPieceTexture;
 
 	// The straight piece with one border.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Solaraq|Appearance")
 	TObjectPtr<UTexture2D> StraightPieceTexture;
 };

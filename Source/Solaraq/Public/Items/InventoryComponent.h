@@ -90,11 +90,11 @@ public:
     int32 AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity);
 
     UFUNCTION(BlueprintCallable, Category = "Inventory")
-    void UseItem(int32 SlotIndex);
+    void UseItem(const FGuid& ItemID);
     
     // The main function to remove a quantity of a specific item.
     UFUNCTION(BlueprintCallable, Category = "Inventory")
-    void RemoveItem(UItemDataAssetBase* ItemToRemove, int32 Quantity);
+    void RemoveItem(const FGuid& ItemID, int32 QuantityToRemove);
     
     // Checks if the inventory contains at least a certain quantity of an item.
     UFUNCTION(BlueprintPure, Category = "Inventory")

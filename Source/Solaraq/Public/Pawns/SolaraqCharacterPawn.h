@@ -49,6 +49,9 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	UFUNCTION(Exec)
+	void Solaraq_PrintInventory();
+	
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// --- Sprinting ---

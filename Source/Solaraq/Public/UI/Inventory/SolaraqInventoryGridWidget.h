@@ -33,6 +33,9 @@ public:
 protected:
 	// Called when the widget is created. We'll use it to bind to the inventory update delegate.
 	virtual void NativeConstruct() override;
+
+	virtual bool NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
+
 	
 	// --- UPROPERTY Bindings ---
 	// Your UMG widget hierarchy must have Canvas Panels with these exact names.

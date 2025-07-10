@@ -12,6 +12,7 @@
 #include "Items/InventoryComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Items/ItemToolDataAsset.h"
+#include "Items/ItemConsumableDataAsset.h"
 #include "Logging/SolaraqLogChannels.h" // Your log channels
 #include "Systems/FishingSubsystem.h"
 
@@ -37,7 +38,7 @@ ASolaraqCharacterPawn::ASolaraqCharacterPawn()
     // Create a camera boom (pulls in towards the player if there is a collision)
     SpringArmComponent = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
     SpringArmComponent->SetupAttachment(RootComponent);
-    SpringArmComponent->TargetArmLength = 800.0f; // Distance from character
+    SpringArmComponent->TargetArmLength = 1600.0f; // Distance from character
     SpringArmComponent->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f)); // Top-down angle
     SpringArmComponent->bEnableCameraLag = false;
     SpringArmComponent->bInheritPitch = false;
@@ -176,7 +177,64 @@ void ASolaraqCharacterPawn::BeginPlay()
             EquipmentComponent->EquipItem(RodData);
             UE_LOG(LogTemp, Warning, TEXT("TEST: Gave player a fishing rod."));
         }
+
+        UItemConsumableDataAsset* AppleData = LoadObject<UItemConsumableDataAsset>(nullptr, TEXT("/Game/Items/Consumables/DA_Apple.DA_Apple"));
+        if (AppleData)
+        {
+            // Give 5 apples. The AddItem function will handle stacking.
+            const int32 UnaddedQuantity = InventoryComponent->AddItem(AppleData, 5);
+            if (UnaddedQuantity > 0)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("TEST: Could not add %d apples to inventory (full?)."), UnaddedQuantity);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("TEST: Gave player 5 apples."));
+            }
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("TEST: Failed to load DA_Apple. Make sure it exists at '/Game/Items/Consumables/DA_Apple'."));
+        }
     }
+}
+
+void ASolaraqCharacterPawn::Solaraq_PrintInventory()
+{
+    if (!InventoryComponent)
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("Debug_PrintInventory: InventoryComponent is NULL."));
+        return;
+    }
+
+    const TArray<FPlacedItem>& Items = InventoryComponent->GetPlacedItems();
+        
+    UE_LOG(LogSolaraqSystem, Log, TEXT("--- INVENTORY CONTENTS ---"));
+
+    if (Items.Num() == 0)
+    {
+        UE_LOG(LogSolaraqSystem, Log, TEXT("Inventory is empty."));
+        return;
+    }
+
+    for (const FPlacedItem& Item : Items)
+    {
+        if (Item.ItemData)
+        {
+            UE_LOG(LogSolaraqSystem, Log, TEXT("Item: %s, Quantity: %d, Position: (%d, %d), ID: %s"),
+                *Item.ItemData->DisplayName.ToString(),
+                Item.Quantity,
+                Item.TopLeft.X,
+                Item.TopLeft.Y,
+                *Item.ItemID.ToString()
+            );
+        }
+        else
+        {
+            UE_LOG(LogSolaraqSystem, Warning, TEXT("Found a placed item entry with NULL ItemData at position (%d, %d)."), Item.TopLeft.X, Item.TopLeft.Y);
+        }
+    }
+    UE_LOG(LogSolaraqSystem, Log, TEXT("--- END OF INVENTORY ---"));
 }
 
 void ASolaraqCharacterPawn::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

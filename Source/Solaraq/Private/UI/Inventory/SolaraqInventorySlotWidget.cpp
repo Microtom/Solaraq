@@ -50,7 +50,7 @@ void USolaraqInventorySlotWidget::ConfigureSlotAppearance(bool bIsTopEdge, bool 
 	}
 	else // This is an internal slot piece
 	{
-		Corner_TL->SetBrush(FSlateBrush()); // Set to an empty brush to make it invisible
+		Corner_TL->SetVisibility(ESlateVisibility::Collapsed);// Set to an empty brush to make it invisible
 	}
 
 	// --- Configure Top-Right Image ---
@@ -72,7 +72,7 @@ void USolaraqInventorySlotWidget::ConfigureSlotAppearance(bool bIsTopEdge, bool 
 	}
 	else
 	{
-		Corner_TR->SetBrush(FSlateBrush());
+		Corner_TR->SetVisibility(ESlateVisibility::Collapsed);
 	}
 	
 	// --- Configure Bottom-Right Image ---
@@ -93,7 +93,7 @@ void USolaraqInventorySlotWidget::ConfigureSlotAppearance(bool bIsTopEdge, bool 
 	}
 	else
 	{
-		Corner_BR->SetBrush(FSlateBrush());
+		Corner_BR->SetVisibility(ESlateVisibility::Collapsed);
 	}
 
 	// --- Configure Bottom-Left Image ---
@@ -114,6 +114,6 @@ void USolaraqInventorySlotWidget::ConfigureSlotAppearance(bool bIsTopEdge, bool 
 	}
 	else
 	{
-		Corner_BL->SetBrush(FSlateBrush());
+		Corner_BL->SetVisibility(ESlateVisibility::Collapsed);
 	}
 }
