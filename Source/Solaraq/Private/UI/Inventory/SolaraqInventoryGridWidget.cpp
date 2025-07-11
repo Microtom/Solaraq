@@ -44,6 +44,9 @@ bool USolaraqInventoryGridWidget::NativeOnDrop(const FGeometry& InGeometry, cons
 {
     Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
 
+	// Make sure we clear the ignored item ID regardless of success or failure.
+	ClearIgnoredItem();
+	
     // Cast the operation to our specific item drag operation class.
     USolaraqItemDragOperation* ItemDragOperation = Cast<USolaraqItemDragOperation>(InOperation);
     if (!ItemDragOperation || !InventoryComponent)
@@ -85,6 +88,7 @@ bool USolaraqInventoryGridWidget::NativeOnDrop(const FGeometry& InGeometry, cons
         // The DragCancelled logic will take over automatically because we are returning false.
         // It will restore visibility on the original widget.
         UE_LOG(LogTemp, Warning, TEXT("Item move failed. Drag will be cancelled."));
+    	RefreshInventory(); 
         return false; // We did not handle the drop.
     }
 }
@@ -133,6 +137,12 @@ void USolaraqInventoryGridWidget::RefreshInventory()
 	TMap<FIntPoint, FGuid> LocalGridState;
 	for (const FPlacedItem& Item : PlacedItems)
 	{
+		// If this is the item being dragged, skip it for the background calculation.
+		if (ItemIDToIgnoreOnRefresh.IsValid() && Item.ItemID == ItemIDToIgnoreOnRefresh)
+		{
+			continue;
+		}
+		
 		if (Item.ItemData)
 		{
 			for (int32 y = 0; y < Item.ItemData->Dimensions.Y; ++y)
@@ -189,6 +199,12 @@ void USolaraqInventoryGridWidget::RefreshInventory()
     UE_LOG(LogTemp, Log, TEXT("  > Starting to place item icons..."));
 	for (const FPlacedItem& Item : PlacedItems)
 	{
+		// Also skip creating an icon for the item being dragged.
+		if (ItemIDToIgnoreOnRefresh.IsValid() && Item.ItemID == ItemIDToIgnoreOnRefresh)
+		{
+			continue;
+		}
+		
         // Log info for the current item being processed
         FString ItemName = Item.ItemData ? Item.ItemData->DisplayName.ToString() : TEXT("INVALID_ITEM_DATA");
         UE_LOG(LogTemp, Log, TEXT("    -> Processing item: '%s' (Qty: %d)"), *ItemName, Item.Quantity);
@@ -199,7 +215,7 @@ void USolaraqInventoryGridWidget::RefreshInventory()
 			if (IconWidget)
 			{
                 UE_LOG(LogTemp, Log, TEXT("      - Successfully created WBP_ItemIcon widget."));
-				IconWidget->Initialize(Item); 
+				IconWidget->Initialize(Item, this); 
                 UE_LOG(LogTemp, Log, TEXT("      - Initialized widget with item data."));
 
 				UCanvasPanelSlot* CanvasSlot = ItemIconCanvas->AddChildToCanvas(IconWidget);
@@ -228,4 +244,14 @@ void USolaraqInventoryGridWidget::RefreshInventory()
 	}
     UE_LOG(LogTemp, Log, TEXT("  > Finished placing item icons."));
     UE_LOG(LogTemp, Log, TEXT("--- WBP_InventoryGrid::RefreshInventory COMPLETE ---"));
+}
+
+void USolaraqInventoryGridWidget::SetItemToIgnore(const FGuid& ItemID)
+{
+	ItemIDToIgnoreOnRefresh = ItemID;
+}
+
+void USolaraqInventoryGridWidget::ClearIgnoredItem()
+{
+	ItemIDToIgnoreOnRefresh.Invalidate();
 }

@@ -8,9 +8,10 @@
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanelSlot.h"
+#include "UI/Inventory/SolaraqInventoryGridWidget.h"
 #include "UI/Inventory/SolaraqItemDragOperation.h"
 
-void USolaraqItemIconWidget::Initialize(const FPlacedItem& InItemInfo)
+void USolaraqItemIconWidget::Initialize(const FPlacedItem& InItemInfo, USolaraqInventoryGridWidget* InOwningGrid)
 {
 	// It's helpful to have a name for the widget instance for logging clarity.
     const FString WidgetName = GetName();
@@ -18,6 +19,7 @@ void USolaraqItemIconWidget::Initialize(const FPlacedItem& InItemInfo)
 
 	// Store the item info for later use (e.g., if the player starts dragging this widget).
 	this->ItemInfo = InItemInfo;
+	this->OwningGrid = InOwningGrid;
 	
 	// --- VALIDATION LOGGING ---
 	if (!ItemInfo.ItemData)
@@ -100,52 +102,47 @@ void USolaraqItemIconWidget::NativeOnDragDetected(const FGeometry& InGeometry, c
 {
 	Super::NativeOnDragDetected(InGeometry, InMouseEvent, OutOperation);
 
-	// Don't proceed if the item info is invalid
-	if (!ItemInfo.IsValid())
+	if (!ItemInfo.IsValid()) return;
+    
+    // Get the parent grid widget. This relies on the UMG hierarchy: ItemIcon -> CanvasPanel -> GridWidget
+	if (!OwningGrid)
 	{
+		UE_LOG(LogTemp, Error, TEXT("OwningGrid pointer is NULL in ItemIcon. Drag will not work correctly."));
 		return;
 	}
 
-	// --- 1. Create the Drag Operation Object ---
+    // --- KEY CHANGE: Refresh the grid BEFORE creating the drag operation ---
+    // 1. Tell the grid to ignore this specific item on its next refresh.
+    OwningGrid->SetItemToIgnore(this->ItemInfo.ItemID);
+    // 2. Trigger the refresh. The grid will now redraw without this item, showing empty 1x1 slots.
+    OwningGrid->RefreshInventory();
+
+	// --- Now, proceed with creating the drag operation as before ---
 	USolaraqItemDragOperation* DragOperation = NewObject<USolaraqItemDragOperation>();
 	if (!DragOperation)
 	{
+        OwningGrid->ClearIgnoredItem(); // Clean up if we fail
+        OwningGrid->RefreshInventory();
 		return;
 	}
 
-	// --- 2. Create a NEW Widget to be the Drag Visual ---
-	// We create a new instance of ourself to be the visual.
-	// This is the key change: we are no longer using 'this' widget as the visual.
+	// Create the drag visual
 	USolaraqItemIconWidget* DragVisual = CreateWidget<USolaraqItemIconWidget>(GetOwningPlayer(), GetClass());
-	if (DragVisual)
+	if(DragVisual)
 	{
-		// Initialize it with the same item info so it looks identical.
-		DragVisual->Initialize(this->ItemInfo);
-		// Make it slightly transparent for a nice visual cue.
+		DragVisual->Initialize(this->ItemInfo, nullptr);
 		DragVisual->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.7f));
-
-		// Set this new widget as the thing to be dragged around.
 		DragOperation->DefaultDragVisual = DragVisual;
 	}
-	else // Fallback in case widget creation fails
-	{
-		// This would revert to the old (invisible) behavior, but it's better than crashing.
-		DragOperation->DefaultDragVisual = this;
-	}
 
-	// --- 3. Configure the Operation's Payload ---
+	// Configure the operation payload
 	DragOperation->Pivot = EDragPivot::MouseDown;
 	DragOperation->ItemInfo = this->ItemInfo;
-	DragOperation->OriginalWidget = this; // VERY IMPORTANT: Store a reference to THIS widget (the one in the grid).
 	DragOperation->DragOffset = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+    
+    // Give the operation a reference to the grid for cancellation handling
+    DragOperation->SourceGrid = OwningGrid; 
 
-	// --- 4. Hide the Original Widget in the Grid ---
-	// This widget (the one in the inventory grid) is now hidden.
-	// The 'DragVisual' we created above is the one that will be visible under the cursor.
-	this->SetVisibility(ESlateVisibility::Hidden);
-
-	// --- 5. Output the configured operation ---
 	OutOperation = DragOperation;
-
 	UE_LOG(LogTemp, Log, TEXT("Drag Detected for item: '%s'"), *ItemInfo.ItemData->DisplayName.ToString());
 }

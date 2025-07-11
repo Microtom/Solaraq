@@ -5,6 +5,7 @@
 #include "Items/InventoryComponent.h"
 #include "SolaraqItemDragOperation.generated.h"
 
+class USolaraqInventoryGridWidget;
 class USolaraqItemIconWidget;
 
 /**
@@ -20,9 +21,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Solaraq|Drag Operation")
 	FPlacedItem ItemInfo;
 
-	// A reference to the widget that initiated the drag.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Solaraq|Drag Operation")
-	TObjectPtr<USolaraqItemIconWidget> OriginalWidget;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Drag Operation")
+	TObjectPtr<USolaraqInventoryGridWidget> SourceGrid;
 
 	// The offset of the mouse cursor from the top-left of the widget when the drag started.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Solaraq|Drag Operation")

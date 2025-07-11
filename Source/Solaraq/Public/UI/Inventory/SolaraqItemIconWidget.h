@@ -7,6 +7,7 @@
 #include "Items/InventoryComponent.h" // We need access to the FPlacedItem struct
 #include "SolaraqItemIconWidget.generated.h"
 
+class USolaraqInventoryGridWidget;
 // Forward declarations for the UMG components we will bind to.
 class UImage;
 class UTextBlock;
@@ -27,7 +28,7 @@ public:
 	 * Sets up the widget's appearance and stores item info based on a FPlacedItem struct.
 	 * @param ItemInfo The struct containing all necessary data for this item icon.
 	 */
-	void Initialize(const FPlacedItem& InItemInfo);
+	void Initialize(const FPlacedItem& InItemInfo, USolaraqInventoryGridWidget* InOwningGrid);
 	FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent);
 	void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent,
 	                          UDragDropOperation*& OutOperation);
@@ -52,4 +53,8 @@ private:
 	// A copy of the item's info for this widget to reference, e.g., for drag-drop operations.
 	UPROPERTY()
 	FPlacedItem ItemInfo;
+
+	// A direct pointer to the grid that owns this icon.
+	UPROPERTY()
+	TObjectPtr<USolaraqInventoryGridWidget> OwningGrid;
 };

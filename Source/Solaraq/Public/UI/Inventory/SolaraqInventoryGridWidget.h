@@ -30,6 +30,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void RefreshInventory();
 
+	/** Tells the grid to ignore a specific item during the next RefreshInventory call. */
+	void SetItemToIgnore(const FGuid& ItemID);
+
+	/** Tells the grid to stop ignoring any items. */
+	void ClearIgnoredItem();
+
 protected:
 	// Called when the widget is created. We'll use it to bind to the inventory update delegate.
 	virtual void NativeConstruct() override;
@@ -66,4 +72,7 @@ private:
 	// A cached pointer to the inventory component for quick access.
 	UPROPERTY()
 	TObjectPtr<UInventoryComponent> InventoryComponent;
+
+	// When a drag starts, we set this ID. RefreshInventory will skip drawing this item.
+	FGuid ItemIDToIgnoreOnRefresh;
 };
