@@ -125,6 +125,7 @@ void USolaraqInventoryGridWidget::RefreshInventory()
     
     UE_LOG(LogTemp, Log, TEXT("  > All initial checks passed. Clearing old widgets."));
 	SlotCanvas->ClearChildren();
+	HighlightCanvas->ClearChildren();
 	ItemIconCanvas->ClearChildren();
 
 	// --- 1. Build a Local Grid State for fast lookups ---

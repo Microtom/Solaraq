@@ -139,10 +139,14 @@ void USolaraqItemIconWidget::NativeOnDragDetected(const FGeometry& InGeometry, c
 	DragOperation->Pivot = EDragPivot::MouseDown;
 	DragOperation->ItemInfo = this->ItemInfo;
 	DragOperation->DragOffset = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
-    
+
+	
     // Give the operation a reference to the grid for cancellation handling
     DragOperation->SourceGrid = OwningGrid; 
 
+	// Pass the highlight widget class from the grid to the operation so it knows what to spawn.
+	DragOperation->HighlightWidgetClass = OwningGrid->GetHighlightWidgetClass();
+	
 	OutOperation = DragOperation;
 	UE_LOG(LogTemp, Log, TEXT("Drag Detected for item: '%s'"), *ItemInfo.ItemData->DisplayName.ToString());
 }

@@ -111,6 +111,9 @@ public:
     UFUNCTION(BlueprintCallable, Category="Inventory")
     bool MoveItem(const FGuid& ItemID, FIntPoint NewTopLeft);
 
+    /** Checks if an item can be moved to a new location without actually moving it. */
+    bool CanMoveItemTo(const FGuid& ItemID, FIntPoint NewTopLeft);
+    
     /** Returns the configured width of the inventory grid. */
     UFUNCTION(BlueprintPure, Category = "Inventory|Grid")
     int32 GetGridWidth() const;

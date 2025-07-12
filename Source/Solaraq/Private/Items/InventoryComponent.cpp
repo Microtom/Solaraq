@@ -60,6 +60,30 @@ bool UInventoryComponent::MoveItem(const FGuid& ItemID, FIntPoint NewTopLeft)
     }
 }
 
+bool UInventoryComponent::CanMoveItemTo(const FGuid& ItemID, FIntPoint NewTopLeft)
+{
+    FPlacedItem* ItemToMove = PlacedItems.FindByPredicate([&ItemID](const FPlacedItem& Item) {
+        return Item.ItemID == ItemID;
+    });
+
+    if (!ItemToMove || !ItemToMove->ItemData)
+    {
+        return false;
+    }
+
+    // Temporarily remove the item to check for space
+    const int32 OriginalIndex = PlacedItems.Find(*ItemToMove);
+    FPlacedItem CopyOfItem = *ItemToMove;
+    PlacedItems.RemoveAt(OriginalIndex, 1, false);
+
+    const bool bSpaceIsFree = IsAreaFree(NewTopLeft, CopyOfItem.ItemData->Dimensions);
+
+    // IMPORTANT: Add the item back to restore the original state of the inventory
+    PlacedItems.Insert(CopyOfItem, OriginalIndex);
+
+    return bSpaceIsFree;
+}
+
 void UInventoryComponent::BeginPlay()
 {
     Super::BeginPlay();

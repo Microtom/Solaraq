@@ -21,13 +21,23 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Solaraq|Drag Operation")
 	FPlacedItem ItemInfo;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Drag Operation")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Solaraq|Drag Operation")
 	TObjectPtr<USolaraqInventoryGridWidget> SourceGrid;
 
 	// The offset of the mouse cursor from the top-left of the widget when the drag started.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Solaraq|Drag Operation")
 	FVector2D DragOffset;
+
+	// The class to use for the drop location highlight.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Solaraq|Drag Operation")
+	TSubclassOf<UUserWidget> HighlightWidgetClass;
+	
+	// A reference to the created highlight widget instance.
+	UPROPERTY()
+	TObjectPtr<UUserWidget> HighlightWidget;
 	
 	// Overridden from UDragDropOperation.
+	virtual void Dragged_Implementation(const FPointerEvent& PointerEvent) override;
 	virtual void DragCancelled_Implementation(const FPointerEvent& PointerEvent) override;
+	virtual void Drop_Implementation(const FPointerEvent& PointerEvent) override;
 };

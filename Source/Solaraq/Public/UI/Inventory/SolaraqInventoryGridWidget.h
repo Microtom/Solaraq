@@ -36,6 +36,11 @@ public:
 	/** Tells the grid to stop ignoring any items. */
 	void ClearIgnoredItem();
 
+	float GetSlotPixelSize() const { return SlotPixelSize; }
+	UInventoryComponent* GetInventoryComponent() const { return InventoryComponent; }
+	UCanvasPanel* GetHighlightCanvas() const { return HighlightCanvas; }
+	TSubclassOf<UUserWidget> GetHighlightWidgetClass() const { return HighlightWidgetClass; }
+
 protected:
 	// Called when the widget is created. We'll use it to bind to the inventory update delegate.
 	virtual void NativeConstruct() override;
@@ -54,18 +59,24 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UCanvasPanel> ItemIconCanvas;
 
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UCanvasPanel> HighlightCanvas;
+	
 	// --- Blueprint-Assignable Properties ---
 
 	// The class of our smart tile widget. Assign WBP_InventorySlot in the editor.
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
 	TSubclassOf<USolaraqInventorySlotWidget> InventorySlotClass;
 	
 	// The class for the item icon widget. We'll create a simple one.
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
 	TSubclassOf<UUserWidget> ItemIconClass; // We'll need to create this simple widget
 
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
+	TSubclassOf<UUserWidget> HighlightWidgetClass;
+	
 	// The size of a single grid slot in pixels.
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
 	float SlotPixelSize = 80.f;
 
 private:
