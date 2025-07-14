@@ -12,7 +12,9 @@
 #include "Items/InventoryComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Items/ItemToolDataAsset.h"
+#include "Engine/World.h" 
 #include "Items/ItemConsumableDataAsset.h"
+#include "Items/ItemPickup.h"
 #include "Logging/SolaraqLogChannels.h" // Your log channels
 #include "Systems/FishingSubsystem.h"
 
@@ -163,6 +165,47 @@ void ASolaraqCharacterPawn::StopSprinting()
     Server_SetSprinting(false);
 }
 
+void ASolaraqCharacterPawn::DropItem(UItemDataAssetBase* ItemData, int32 Quantity)
+{
+    if (!ItemData || Quantity <= 0 || !GetWorld() || !DefaultPickupClass)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("DropItem failed: Invalid parameters or DefaultPickupClass not set in the Character Blueprint."));
+        return;
+    }
+
+    // 1. Determine a spawn location slightly in front of the player.
+    const FVector ActorLocation = GetActorLocation();
+    const FVector ActorForward = GetActorForwardVector();
+    FVector SpawnLocation = ActorLocation + (ActorForward * 150.0f); // Spawn 1.5m in front.
+
+    // 2. Find the ground below this point using a line trace to avoid spawning mid-air.
+    FHitResult HitResult;
+    FVector TraceStart = SpawnLocation + FVector(0, 0, 500.0f); // Start trace 5m up
+    FVector TraceEnd = SpawnLocation - FVector(0, 0, 500.0f);   // End trace 5m down
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+
+    if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    {
+        // A surface was hit, use the impact point as the final spawn location.
+        SpawnLocation = HitResult.ImpactPoint;
+    }
+
+    // 3. Spawn the pickup actor.
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AItemPickup* NewPickup = GetWorld()->SpawnActor<AItemPickup>(DefaultPickupClass, SpawnLocation, FRotator::ZeroRotator, SpawnParams);
+
+    // 4. Initialize the spawned pickup with the correct item data and quantity.
+    if (NewPickup)
+    {
+        NewPickup->ItemData = ItemData;
+        NewPickup->Quantity = Quantity;
+        // The pickup's own BeginPlay/OnConstruction logic will handle setting the visual mesh.
+        UE_LOG(LogTemp, Log, TEXT("Dropped %d x %s into the world at %s."), Quantity, *ItemData->DisplayName.ToString(), *SpawnLocation.ToString());
+    }
+}
+
 void ASolaraqCharacterPawn::BeginPlay()
 {
     Super::BeginPlay();
@@ -197,44 +240,6 @@ void ASolaraqCharacterPawn::BeginPlay()
             UE_LOG(LogTemp, Warning, TEXT("TEST: Failed to load DA_Apple. Make sure it exists at '/Game/Items/Consumables/DA_Apple'."));
         }
     }
-}
-
-void ASolaraqCharacterPawn::Solaraq_PrintInventory()
-{
-    if (!InventoryComponent)
-    {
-        UE_LOG(LogSolaraqSystem, Error, TEXT("Debug_PrintInventory: InventoryComponent is NULL."));
-        return;
-    }
-
-    const TArray<FPlacedItem>& Items = InventoryComponent->GetPlacedItems();
-        
-    UE_LOG(LogSolaraqSystem, Log, TEXT("--- INVENTORY CONTENTS ---"));
-
-    if (Items.Num() == 0)
-    {
-        UE_LOG(LogSolaraqSystem, Log, TEXT("Inventory is empty."));
-        return;
-    }
-
-    for (const FPlacedItem& Item : Items)
-    {
-        if (Item.ItemData)
-        {
-            UE_LOG(LogSolaraqSystem, Log, TEXT("Item: %s, Quantity: %d, Position: (%d, %d), ID: %s"),
-                *Item.ItemData->DisplayName.ToString(),
-                Item.Quantity,
-                Item.TopLeft.X,
-                Item.TopLeft.Y,
-                *Item.ItemID.ToString()
-            );
-        }
-        else
-        {
-            UE_LOG(LogSolaraqSystem, Warning, TEXT("Found a placed item entry with NULL ItemData at position (%d, %d)."), Item.TopLeft.X, Item.TopLeft.Y);
-        }
-    }
-    UE_LOG(LogSolaraqSystem, Log, TEXT("--- END OF INVENTORY ---"));
 }
 
 void ASolaraqCharacterPawn::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

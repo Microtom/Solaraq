@@ -5,6 +5,10 @@
 #include "Components/CanvasPanelSlot.h"
 #include "UI/SolaraqWidgetDragOperation.h"
 #include "Logging/SolaraqLogChannels.h"
+#include "UI/Inventory/SolaraqItemDragOperation.h" // <-- ADD THIS
+#include "Pawns/SolaraqCharacterPawn.h"            // <-- ADD THIS
+#include "Items/InventoryComponent.h"             // <-- ADD THIS
+#include "UI/Inventory/SolaraqInventoryGridWidget.h"
 
 UCanvasPanel* USolaraqHUDWidget::GetMainCanvas()
 {
@@ -14,45 +18,62 @@ UCanvasPanel* USolaraqHUDWidget::GetMainCanvas()
 bool USolaraqHUDWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
 {
 	Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
+
 	UE_LOG(LogTemp, Log, TEXT("--- HUD::NativeOnDrop CALLED --- If you see this, the HUD is correctly hit-testable."));
-
-	// Try to cast the operation to our custom class.
-	USolaraqWidgetDragOperation* DragOperation = Cast<USolaraqWidgetDragOperation>(InOperation);
-	if (!DragOperation)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("  > Drop failed: Operation was not a USolaraqWidgetDragOperation."));
-		return false;
-	}
-	UE_LOG(LogTemp, Log, TEXT("  > Cast to USolaraqWidgetDragOperation successful."));
 	
-	if (!DragOperation->WidgetReference)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("  > Drop failed: WidgetReference in operation was NULL."));
+	// --- 1. Check if a UI WIDGET is being dropped for repositioning ---
+	if (USolaraqWidgetDragOperation* WidgetDragOp = Cast<USolaraqWidgetDragOperation>(InOperation))
+	{		
+		if (!WidgetDragOp->WidgetReference)
+		{
+			return false;
+		}
+		
+		const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InDragDropEvent.GetScreenSpacePosition());
+		const FVector2D FinalPosition = LocalPosition - WidgetDragOp->DragOffset;
+
+		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(WidgetDragOp->WidgetReference->Slot))
+		{
+			CanvasSlot->SetPosition(FinalPosition);
+			WidgetDragOp->WidgetReference->SetVisibility(ESlateVisibility::Visible);
+			return true;
+		}
 		return false;
 	}
-	UE_LOG(LogTemp, Log, TEXT("  > WidgetReference is valid ('%s')."), *DragOperation->WidgetReference->GetName());
 
-	// Calculate the new position for the widget in the HUD's canvas.
-	const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InDragDropEvent.GetScreenSpacePosition());
-	const FVector2D FinalPosition = LocalPosition - DragOperation->DragOffset;
-	UE_LOG(LogTemp, Log, TEXT("  > Calculated final position: %s"), *FinalPosition.ToString());
-
-	// Get the canvas slot of the original widget and set its new position.
-	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(DragOperation->WidgetReference->Slot))
+	// --- 2. If not a UI widget, check if an INVENTORY ITEM is being dropped ---
+	if (USolaraqItemDragOperation* ItemDragOp = Cast<USolaraqItemDragOperation>(InOperation))
 	{
-		CanvasSlot->SetPosition(FinalPosition);
-		UE_LOG(LogTemp, Log, TEXT("  > Successfully set position on the CanvasPanelSlot."));
-	}
-	else
-	{
-		UE_LOG(LogTemp, Error, TEXT("  > FAILED to get CanvasPanelSlot from the WidgetReference. Is it a direct child of the canvas?"));
+		if (!ItemDragOp->ItemInfo.IsValid() || !ItemDragOp->SourceGrid)
+		{
+			return false;
+		}
+		
+		UInventoryComponent* SourceInventory = ItemDragOp->SourceGrid->GetInventoryComponent();
+		if (!SourceInventory)
+		{
+			return false;
+		}
+		
+		const FPlacedItem ItemToDrop = ItemDragOp->ItemInfo;
+
+		// Remove the full stack from the source inventory. This will trigger the OnInventoryUpdated delegate.
+		SourceInventory->RemoveItem(ItemToDrop.ItemID, ItemToDrop.Quantity);
+
+		// Get the player character to handle spawning the item in the world.
+		if (ASolaraqCharacterPawn* PlayerPawn = Cast<ASolaraqCharacterPawn>(GetOwningPlayerPawn()))
+		{
+			PlayerPawn->DropItem(ItemToDrop.ItemData, ItemToDrop.Quantity);
+			UE_LOG(LogTemp, Log, TEXT("  > Instructed PlayerPawn to drop item."));
+			return true;
+		}
+		
+		UE_LOG(LogTemp, Error, TEXT("  > Drop failed: OwningPlayerPawn could not be cast to ASolaraqCharacterPawn."));
+		// NOTE: If the drop fails after removing the item, it will be lost. For a networked game,
+		// you would need a more robust transaction system (e.g., only remove the item after the server confirms the drop).
+		return false;
 	}
 
-	// IMPORTANT: Restore the original widget's visibility so it can be interacted with again.
-	DragOperation->WidgetReference->SetVisibility(ESlateVisibility::Visible);
-	UE_LOG(LogTemp, Log, TEXT("  > Restored original widget visibility to Visible."));
-
-	// We have successfully handled the drop.
-	UE_LOG(LogTemp, Log, TEXT("  > Drop handled successfully. Returning true."));
-	return true;
+	UE_LOG(LogTemp, Log, TEXT("  > Unhandled drop operation type."));
+	return false;
 }

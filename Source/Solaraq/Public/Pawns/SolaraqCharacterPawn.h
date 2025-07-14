@@ -8,6 +8,7 @@
 #include "Components/EquipmentComponent.h" 
 #include "SolaraqCharacterPawn.generated.h"
 
+class AItemPickup;
 class UCameraComponent;
 class USpringArmComponent;
 class UInventoryComponent;
@@ -45,12 +46,22 @@ public:
 	void StartSprinting();
 	/** Call this from your PlayerController to stop sprinting. */
 	void StopSprinting();
+
+	// --- Inventory ---
+	/** The class of pickup to spawn when an item is dropped. This should be set in your Character Blueprint. */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory", meta=(DisplayName="Default Item Pickup Class"))
+	TSubclassOf<AItemPickup> DefaultPickupClass;
+
+	/**
+	 * Handles the logic of dropping an item into the world. Finds a valid location and spawns a pickup actor.
+	 * @param ItemData The data of the item to drop.
+	 * @param Quantity The amount of the item to drop.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|Inventory")
+	void DropItem(UItemDataAssetBase* ItemData, int32 Quantity);
 	
 protected:
 	virtual void BeginPlay() override;
-
-	UFUNCTION(Exec)
-	void Solaraq_PrintInventory();
 	
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
