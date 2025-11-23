@@ -288,11 +288,21 @@ void ASolaraqShipBase::ApplyVisualScale(float ScaleFactor)
 {
     if (!FMath::IsNearlyEqual(ScaleFactor, LastAppliedScaleFactor, 0.01f))
     {
-        if (ShipMeshComponent)
+        // Scale the ROOT, not just the mesh. 
+        // Since the mesh is attached to the root, it will scale automatically.
+        if (CollisionAndPhysicsRoot)
         {
-            ShipMeshComponent->SetRelativeScale3D(DefaultVisualMeshScale * ScaleFactor);
-            LastAppliedScaleFactor = ScaleFactor;
+            CollisionAndPhysicsRoot->SetWorldScale3D(FVector(ScaleFactor));
+            
+            // If we are shrinking mass significantly, physics forces might need adjustment
+            // But since you manually calculate Thrust and Gravity based on scale factors elsewhere, this is fine.
+            CollisionAndPhysicsRoot->UpdateBodySetup(); 
         }
+
+        // REMOVE or COMMENT OUT the mesh scaling, as it inherits from root
+        // if (ShipMeshComponent) { ... } 
+        
+        LastAppliedScaleFactor = ScaleFactor;
     }
 }
 

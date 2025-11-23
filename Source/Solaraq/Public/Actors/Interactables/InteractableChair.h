@@ -1,46 +1,34 @@
-// InteractableInterface.h
-
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/Interface.h"
-#include "InteractableInterface.generated.h"
+#include "GameFramework/Actor.h"
+#include "Systems/Interfaces/InteractableInterface.h" // Include the interface here
+#include "InteractableChair.generated.h" // Must be the LAST include
 
-UINTERFACE(MinimalAPI, Blueprintable)
-class UInteractableInterface : public UInterface
+UCLASS()
+class SOLARAQ_API AInteractableChair : public AActor, public IInteractableInterface
 {
 	GENERATED_BODY()
-};
+	
+public:	
+	AInteractableChair();
 
-class SOLARAQ_API IInteractableInterface
-{
-	GENERATED_BODY()
+protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	class USceneComponent* DefaultSceneRoot;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	class UStaticMeshComponent* ChairMesh;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	class USceneComponent* SeatAttachmentPoint;
+
+	// Track who is currently sitting
+	UPROPERTY()
+	class APawn* SeatedPawn;
 
 public:
-	/**
-	 * Main interaction trigger. Called when the player wants to start interacting.
-	 * The object itself can decide what to do (e.g., open a door, start a cutscene).
-	 * For a chair, this will likely be empty, as the Pawn drives the logic.
-	 * @param InteractingPawn The pawn that is performing the interaction.
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
-	void Interact(APawn* InteractingPawn);
-
-	/**
-	 * Gets the world-space transform where the character should be to *begin* the interaction.
-	 * For a chair, this is the spot in front of it.
-	 * @param OutTransform The resulting approach transform.
-	 * @return True if this object provides an approach point, false otherwise.
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
-	bool GetInteractionApproachPoint(FTransform& OutTransform);
-
-	/**
-	 * Gets the world-space transform for the final, completed interaction state.
-	 * For a chair, this is the seated position.
-	 * @param OutTransform The resulting final transform.
-	 * @return True if this object provides a final interaction point, false otherwise.
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
-	bool GetFinalInteractionTransform(FTransform& OutTransform);
+	// --- Interface Implementation ---
+	// We override the _Implementation version because it is a BlueprintNativeEvent
+	virtual void Interact_Implementation(APawn* InteractingPawn) override;
 };

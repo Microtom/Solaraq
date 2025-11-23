@@ -125,6 +125,9 @@ void ASolaraqProjectile::OnOverlapBegin(UPrimitiveComponent* OverlappedComponent
         // Clients can play effects immediately and then the actor will be destroyed.
         if (HasAuthority())
         {
+            SetActorHiddenInGame(true);
+            SetActorEnableCollision(false);
+            
              UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Server: Destroying projectile %s after overlap."), *GetName());
             Destroy();
         }

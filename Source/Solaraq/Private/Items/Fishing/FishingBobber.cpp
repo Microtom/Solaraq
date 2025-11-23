@@ -48,6 +48,7 @@ void AFishingBobber::Tick(float DeltaTime)
 // FIXED: The signature now matches the header and the delegate
 void AFishingBobber::OnBobberHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
+    // Check if we hit something generally "upwards" (ground/water)
     if (Hit.ImpactNormal.Z > 0.7)
     {
         if (AItemActor_FishingRod* OwningRod = Cast<AItemActor_FishingRod>(GetOwner()))
@@ -59,16 +60,24 @@ void AFishingBobber::OnBobberHit(UPrimitiveComponent* HitComponent, AActor* Othe
             FishingSS->OnBobberLandedInWater();
         }
         
-        // --- KEY CHANGE: NUKE THE BOBBER'S PHYSICS ---
+        // --- FIX START: DISABLE COLLISION COMPLETELY ---
+        
+        // 1. Stop Projectile movement
         ProjectileMovement->StopMovementImmediately();
         ProjectileMovement->SetComponentTickEnabled(false);
-        // Make the collision sphere a non-simulating "ghost" so it doesn't fight the rope.
-        CollisionComponent->SetSimulatePhysics(false);
         
-        // We no longer need our custom buoyancy logic, as the rope handles everything.
-        // StartFloating(Hit.ImpactPoint.Z); // REMOVE THIS
-        bIsInWater = false; // Disable the Tick logic for buoyancy.
+        // 2. Disable Physics Simulation
+        CollisionComponent->SetSimulatePhysics(false);
 
+        // 3. CRITICAL: Turn off collision so the XPBD Line Trace doesn't hit THIS bobber.
+        // If we don't do this, the rope solver hits the bobber sphere and pushes it up forever.
+        CollisionComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+        // --- FIX END ---
+        
+        bIsInWater = false; 
+
+        // Unbind the event so this doesn't fire again
         CollisionComponent->OnComponentHit.RemoveDynamic(this, &AFishingBobber::OnBobberHit);
     }
 }

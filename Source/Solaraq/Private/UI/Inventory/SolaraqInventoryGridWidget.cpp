@@ -88,7 +88,6 @@ bool USolaraqInventoryGridWidget::NativeOnDrop(const FGeometry& InGeometry, cons
         // The DragCancelled logic will take over automatically because we are returning false.
         // It will restore visibility on the original widget.
         UE_LOG(LogTemp, Warning, TEXT("Item move failed. Drag will be cancelled."));
-    	RefreshInventory(); 
         return false; // We did not handle the drop.
     }
 }

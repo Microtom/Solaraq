@@ -261,76 +261,36 @@ void ATurretBase::OnRep_ReplicatedYawPivotRelativeRotation()
 
 void ATurretBase::RotateTurretTowards(const FVector& TargetWorldLocation, float DeltaTime)
 {
-    if (!HasAuthority()) return; 
+    if (!HasAuthority() || !TurretYawPivot) return;
 
-    if (!TurretYawPivot || !TurretYawPivot->GetAttachParent() || !MuzzleLocationComponent)
+    // 1. Calculate Desired Rotation in World Space
+    FVector MuzzleLoc = GetMuzzleLocation();
+    FVector Direction = (TargetWorldLocation - MuzzleLoc).GetSafeNormal();
+    FRotator TargetWorldRot = Direction.Rotation();
+
+    // 2. Convert to Relative Space (Parent -> Target)
+    USceneComponent* Parent = TurretYawPivot->GetAttachParent();
+    if (!Parent) return;
+
+    FTransform ParentTransform = Parent->GetComponentTransform();
+    // Inverse transform the target rotation to get it relative to the parent
+    FRotator TargetRelativeRot = ParentTransform.InverseTransformRotation(TargetWorldRot.Quaternion()).Rotator();
+
+    // 3. Clamp Yaw if necessary
+    if (MaxYawRotationAngleDegrees > 0.0f && MaxYawRotationAngleDegrees < 180.0f)
     {
-        UE_LOG(LogSolaraqTurret, Warning, TEXT("Turret %s: RotateTurretTowards: Missing components. Aborting rotation."), *GetName());
-        return;
+        TargetRelativeRot.Yaw = FMath::ClampAngle(TargetRelativeRot.Yaw, -MaxYawRotationAngleDegrees, MaxYawRotationAngleDegrees);
     }
 
-    // 1. Get the desired yaw in degrees from atan2 (range -180 to 180)
-    float DesiredRelativeYawDegreesAtan2 = GetDesiredYawRelativeToBase(TargetWorldLocation);
+    // 4. Lock Pitch/Roll (We only rotate YawPivot)
+    FRotator CurrentRelativeRot = TurretYawPivot->GetRelativeRotation();
+    FRotator FinalTarget(CurrentRelativeRot.Pitch, TargetRelativeRot.Yaw, CurrentRelativeRot.Roll);
 
-    // (Clamping logic remains the same if you have yaw limits)
-    if (MaxYawRotationAngleDegrees > KINDA_SMALL_NUMBER && MaxYawRotationAngleDegrees < (180.0f - KINDA_SMALL_NUMBER))
-    {
-        DesiredRelativeYawDegreesAtan2 = FMath::Clamp(DesiredRelativeYawDegreesAtan2, -MaxYawRotationAngleDegrees, MaxYawRotationAngleDegrees);
-    }
+    // 5. Interpolate
+    FRotator NewRot = FMath::RInterpTo(CurrentRelativeRot, FinalTarget, DeltaTime, TurnRateDegreesPerSecond);
 
-    FRotator CurrentRelativeRotation = TurretYawPivot->GetRelativeRotation();
-    float CurrentYawDegrees = CurrentRelativeRotation.Yaw;
-
-    // 2. Unwrap the target yaw to be closer to the current yaw
-    // This helps prevent RInterpTo from choosing the "long way around" if atan2 output flips sign
-    // when the target crosses the -180/180 boundary relative to the turret's current orientation.
-    float TargetYawDegreesContinuous = DesiredRelativeYawDegreesAtan2;
-
-    // If the shortest angle between current and atan2 target is more than 180 degrees the "wrong way"
-    // adjust the atan2 target by 360 to make it continuous.
-    if (FMath::Abs(TargetYawDegreesContinuous - CurrentYawDegrees) > 180.0f)
-    {
-        if (TargetYawDegreesContinuous > CurrentYawDegrees)
-        {
-            TargetYawDegreesContinuous -= 360.0f;
-        }
-        else
-        {
-            TargetYawDegreesContinuous += 360.0f;
-        }
-    }
-    // One more check: if after unwrapping, it's still far due to multiple wraps (less likely for single frame change)
-    // This is a simpler form of finding the delta and choosing the smallest one.
-    // A more robust way:
-    // float DeltaYaw = FMath::FindDeltaAngleDegrees(CurrentYawDegrees, DesiredRelativeYawDegreesAtan2);
-    // float TargetYawForInterp = CurrentYawDegrees + DeltaYaw;
-    // For now, the above unwrap should help with the single large jump.
-    // Let's use FMath::FindDeltaAngleDegrees for a cleaner approach:
-
-    float DeltaYaw = FMath::FindDeltaAngleDegrees(CurrentYawDegrees, DesiredRelativeYawDegreesAtan2);
-    float TargetYawForInterp = CurrentYawDegrees + DeltaYaw;
-
-
-    // Construct the target rotation for RInterpTo
-    FRotator TargetRelativeRotationForInterp = FRotator(CurrentRelativeRotation.Pitch, TargetYawForInterp, CurrentRelativeRotation.Roll);
-
-    UE_LOG(LogSolaraqTurret, Warning, TEXT("SERVER Turret %s: RotateTurretTowards: CurrentRelYaw: %.2f, atan2Desired: %.2f, DeltaYaw: %.2f, TargetForInterp: %.2f"),
-        *GetName(),
-        CurrentYawDegrees,
-        DesiredRelativeYawDegreesAtan2,
-        DeltaYaw,
-        TargetYawForInterp);
-
-    // Interpolate smoothly
-    FRotator NewRelativeRotation = FMath::RInterpTo(
-        CurrentRelativeRotation,
-        TargetRelativeRotationForInterp, 
-        DeltaTime,
-        TurnRateDegreesPerSecond 
-    );
-
-    TurretYawPivot->SetRelativeRotation(NewRelativeRotation);
-    ReplicatedYawPivotRelativeRotation = NewRelativeRotation; 
+    TurretYawPivot->SetRelativeRotation(NewRot);
+    ReplicatedYawPivotRelativeRotation = NewRot;
 }
 
 void ATurretBase::AttemptFire(const FVector& AimLocation)
