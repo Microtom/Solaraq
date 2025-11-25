@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "UI/SolaraqMinimapInterface.h"
 #include "CelestialBodyBase.generated.h"
 
 // Forward Declarations
@@ -24,7 +25,7 @@ class ASolaraqShipBase;
  * Gravity and Scaling logic is primarily Server-Authoritative.
  */
 UCLASS(Abstract, Blueprintable) // Abstract: Cannot place directly. Blueprintable: Can create BP children.
-class SOLARAQ_API ACelestialBodyBase : public AActor
+class SOLARAQ_API ACelestialBodyBase : public AActor, public ISolaraqMinimapInterface
 {
 	GENERATED_BODY()
 
@@ -48,6 +49,9 @@ public:
 #endif
 	//~ End UObject Interface
 
+	// --- Minimap Interface ---
+	virtual FSolaraqMinimapData GetMinimapData_Implementation() const override;
+	
 protected:
 	// --- Components ---
 
@@ -138,6 +142,13 @@ protected:
 
 	/** Ensures radii properties are valid (non-negative) and ScalingRadius <= InfluenceRadius. Called during construction and property changes. */
 	void ValidateRadii();
+
+	// The world radius that equals 1.0 scale on the minimap
+	// If your mesh radius is 5000, and this is 5000, icon is drawn at 100% size (122px).
+	UPROPERTY(EditDefaultsOnly, Category = "Minimap")
+	float MinimapReferenceRadius = 5000.0f;
+
+	
 };
 
 // --- END OF FILE CelestialBodyBase.h ---

@@ -6,6 +6,7 @@
 #include "GameFramework/Pawn.h"
 #include "GenericTeamAgentInterface.h"
 #include "TimerManager.h"
+#include "UI/SolaraqMinimapInterface.h"
 #include "Items/InventoryComponent.h"
 #include "Components/DockingPadComponent.h" // Includes EDockingStatus
 #include "SolaraqShipBase.generated.h" // Must be last include
@@ -15,6 +16,7 @@ class ASolaraqHomingProjectile;
 class ASolaraqProjectile;
 class UStaticMeshComponent;
 class USpringArmComponent;
+class UCameraComponent; 
 class USphereComponent;
 class USceneComponent;
 class UDockingPadComponent;
@@ -24,7 +26,7 @@ class UDamageType; // Included as it was in TakeDamage parameters
  * @brief Abstract base class for all player-controlled and AI ships in Solaraq.
  */
 UCLASS(Abstract)
-class SOLARAQ_API ASolaraqShipBase : public APawn, public IGenericTeamAgentInterface
+class SOLARAQ_API ASolaraqShipBase : public APawn, public IGenericTeamAgentInterface, public ISolaraqMinimapInterface
 {
 	GENERATED_BODY()
 
@@ -45,6 +47,9 @@ public:
 	virtual FGenericTeamId GetGenericTeamId() const override;
 	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
 
+	// --- Minimap Interface ---
+	virtual FSolaraqMinimapData GetMinimapData_Implementation() const override;
+	
 	// --- INTERACTION & TRANSITIONS ---
 	/** Called by PlayerController when Interact is pressed (e.g., to initiate docking transition). */
 	void RequestInteraction();
@@ -67,7 +72,8 @@ public:
 	FORCEINLINE USphereComponent* GetCollisionAndPhysicsRoot() const { return CollisionAndPhysicsRoot; }
 	FORCEINLINE UStaticMeshComponent* GetShipMeshComponent() const { return ShipMeshComponent; }
 	FORCEINLINE USpringArmComponent* GetSpringArmComponent() const { return SpringArmComponent; }
-
+	FORCEINLINE UCameraComponent* GetCameraComponent() const { return CameraComponent; }
+	
 	UFUNCTION(BlueprintPure, Category = "Solaraq|Boost")
 	float GetCurrentEnergy() const { return CurrentEnergy; }
 	UFUNCTION(BlueprintPure, Category = "Solaraq|Boost")
@@ -154,7 +160,9 @@ protected:
 	TObjectPtr<USpringArmComponent> SpringArmComponent;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> MuzzlePoint;
-
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components")
+	TObjectPtr<UCameraComponent> CameraComponent;
+	
 	// --- MOVEMENT & PHYSICS ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Solaraq|Movement", meta = (ForceUnits="cm/s^2 * kg?"))
 	float ThrustForce = 140000.0f;

@@ -11,6 +11,7 @@ struct FInputActionValue;
 class UInputMappingContext;
 class UInputAction;
 class ASolaraqShipBase;
+class USolaraqHUDWidget; 
 class UUserWidget; // For target markers
 
 UCLASS()
@@ -41,6 +42,18 @@ protected:
     virtual void OnRep_Pawn() override;
     //~ End ASolaraqBasePlayerController Interface
 
+    // --- UI ---
+    /** The HUD Widget Class to spawn (Assign WBP_SolaraqHUD here in Blueprint) */
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
+    TSubclassOf<USolaraqHUDWidget> MainHUDWidgetClass;
+
+    /** The runtime instance of the HUD */
+    UPROPERTY()
+    TObjectPtr<USolaraqHUDWidget> MainHUDWidgetInstance;
+
+    // Helper to spawn the HUD
+    void CreateHUD();
+    
     // --- Input Assets ---
     /** Input Mapping Context for Ship Controls */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Ship")

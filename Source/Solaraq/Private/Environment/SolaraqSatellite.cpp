@@ -192,6 +192,38 @@ void ASolaraqSatellite::PostEditChangeProperty(FPropertyChangedEvent& PropertyCh
     }
 }
 
+FSolaraqMinimapData ASolaraqSatellite::GetMinimapData_Implementation() const
+{
+    FSolaraqMinimapData Data;
+
+    // 1. Set Type
+    Data.IconType = EMinimapIconType::Moon; // Ensure 'Moon' is in your Enum
+
+    // 2. Set Visibility
+    Data.bIsVisible = true;
+
+    // 3. Set Color
+    // White ensures the texture shows its original colors and is not invisible
+    Data.IconColor = FLinearColor::White;
+
+    // 4. Set Scale
+    // We use the same Reference Radius (5000.0f) as the planets so 
+    // moons appear visually smaller relative to planets on the map.
+    const float ReferenceRadius = 5000.0f;
+
+    if (SatelliteMeshComponent)
+    {
+        float ActualRadius = SatelliteMeshComponent->Bounds.SphereRadius;
+        Data.IconScale = ActualRadius / ReferenceRadius;
+    }
+    else
+    {
+        Data.IconScale = 1.0f;
+    }
+
+    return Data;
+}
+
 void ASolaraqSatellite::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);

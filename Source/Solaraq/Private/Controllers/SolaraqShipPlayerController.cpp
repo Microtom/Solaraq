@@ -6,6 +6,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InputAction.h"
+#include "UI/SolaraqHUDWidget.h" 
 #include "Components/DockingPadComponent.h"
 #include "UI/MiningAimWidgetInterface.h"
 #include "Blueprint/UserWidget.h" // For target markers
@@ -150,6 +151,12 @@ void ASolaraqShipPlayerController::OnPossess(APawn* InPawn)
 {
     Super::OnPossess(InPawn); // Calls ASolaraqBasePlayerController::OnPossess
 
+    // 1. Create the HUD if we are the local player
+    if (IsLocalPlayerController())
+    {
+        CreateHUD();
+    }
+    
     ASolaraqShipBase* PossessedShip = Cast<ASolaraqShipBase>(InPawn);
     FString AuthorityPrefix = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
 
@@ -176,6 +183,13 @@ void ASolaraqShipPlayerController::OnPossess(APawn* InPawn)
 
 void ASolaraqShipPlayerController::OnUnPossess()
 {
+    // 1. Remove the HUD when we leave the ship
+    if (MainHUDWidgetInstance)
+    {
+        MainHUDWidgetInstance->RemoveFromParent();
+        MainHUDWidgetInstance = nullptr;
+    }
+    
     FString AuthorityPrefix = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
     UE_LOG(LogSolaraqMovement, Log, TEXT("%s ASolaraqShipPlayerController (%s): OnUnPossess - Unpossessing: %s."),
         *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(GetPawn()));
@@ -222,6 +236,26 @@ void ASolaraqShipPlayerController::OnRep_Pawn()
     // OnPossess should have been called by the engine's replication system if the pawn changed significantly,
     // but this is a good safeguard.
     ApplyShipInputMappingContext();
+}
+
+void ASolaraqShipPlayerController::CreateHUD()
+{
+    // Prevent duplicate creation
+    if (MainHUDWidgetInstance) return;
+
+    if (!MainHUDWidgetClass)
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("ShipPC: MainHUDWidgetClass is not set in the Blueprint!"));
+        return;
+    }
+
+    // Create and Add to Viewport
+    MainHUDWidgetInstance = CreateWidget<USolaraqHUDWidget>(this, MainHUDWidgetClass);
+    if (MainHUDWidgetInstance)
+    {
+        MainHUDWidgetInstance->AddToViewport();
+        UE_LOG(LogSolaraqSystem, Log, TEXT("ShipPC: HUD Created and added to viewport."));
+    }
 }
 
 

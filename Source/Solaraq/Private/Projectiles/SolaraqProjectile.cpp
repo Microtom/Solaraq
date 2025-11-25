@@ -82,6 +82,15 @@ void ASolaraqProjectile::BeginPlay()
         UE_LOG(LogSolaraqProjectile, Error, TEXT("Projectile %s: CollisionComp is NULL in BeginPlay! Cannot bind OnOverlapBegin."), *GetName());
     }
 
+    // Ignore the Instigator (The Ship) so we don't trigger overlaps or physics bumps
+    if (CollisionComp && GetInstigator())
+    {
+        CollisionComp->IgnoreActorWhenMoving(GetInstigator(), true);
+        
+        // Also tell the Ship to ignore the projectile (Two-way ignore)
+        GetInstigator()->MoveIgnoreActorAdd(this);
+    }
+    
     UE_LOG(LogSolaraqProjectile, Log, TEXT("Projectile %s Spawned. InitialSpeed: %.1f, LifeSpan: %.1f"),
         *GetName(), ProjectileMovement ? ProjectileMovement->InitialSpeed : -1.f, InitialLifeSpan);
 }
@@ -89,53 +98,68 @@ void ASolaraqProjectile::BeginPlay()
 void ASolaraqProjectile::OnOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
     UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-    // Only process hit if it's a valid overlap against a different actor/component
-    if ((OtherActor != nullptr) && (OtherActor != this) && (OtherComp != nullptr))
+    // 1. Basic Validity Checks
+    // Ensure we hit a valid actor/component and it is not the bullet itself
+    if ((OtherActor == nullptr) || (OtherComp == nullptr) || (OtherActor == this))
     {
-         UE_LOG(LogSolaraqProjectile, Log, TEXT("Projectile %s Overlapped: %s (Component: %s)"), // Changed log message
-             *GetName(), *OtherActor->GetName(), *OtherComp->GetName());
+        return;
+    }
 
-        ASolaraqShipBase* HitShip = Cast<ASolaraqShipBase>(OtherActor);
+    // 2. SELF-DAMAGE PROTECTION (The Fix)
+    // Ignore the Actor that fired this projectile (The Ship)
+    if (OtherActor == GetInstigator())
+    {
+        return;
+    }
+    // Also ignore the Owner (Ship sets itself as Owner in PerformFireWeapon)
+    if (OtherActor == GetOwner())
+    {
+        return;
+    }
+
+    // --- HIT LOGIC STARTS HERE ---
+
+    UE_LOG(LogSolaraqProjectile, Log, TEXT("Projectile %s Overlapped: %s (Component: %s)"), 
+         *GetName(), *OtherActor->GetName(), *OtherComp->GetName());
+
+    ASolaraqShipBase* HitShip = Cast<ASolaraqShipBase>(OtherActor);
+    
+    // Only apply damage/logic on the Server
+    if (HasAuthority())
+    {
         if (HitShip)
         {
             UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s overlapped Ship %s!"), *GetName(), *HitShip->GetName());
 
-            if (HasAuthority())
-            {
-                TSubclassOf<UDamageType> DmgTypeClass = DamageTypeClass ? DamageTypeClass : TSubclassOf<UDamageType>(UDamageType::StaticClass());
+            // Determine Damage Type
+            TSubclassOf<UDamageType> DmgTypeClass = DamageTypeClass ? DamageTypeClass : TSubclassOf<UDamageType>(UDamageType::StaticClass());
 
-                // Use SweepResult for FPointDamageEvent.
-                // SweepResult.ImpactNormal can be used for the ShotDirection.
-                FPointDamageEvent DamageEvent(BaseDamage, SweepResult, SweepResult.ImpactNormal, DmgTypeClass);
+            // Prepare Damage Event
+            // Note: If bFromSweep is false, SweepResult might be empty/invalid, 
+            // so using the projectile's forward vector for direction is often safer for overlaps.
+            FVector ShotDirection = GetActorForwardVector();
+            FPointDamageEvent DamageEvent(BaseDamage, SweepResult, ShotDirection, DmgTypeClass);
 
-                AController* InstigatorController = GetInstigatorController();
-                UE_LOG(LogSolaraqProjectile, Log, TEXT("Server: Applying %.1f PointDamage to %s from %s (Instigator: %s) via Overlap"),
-                       BaseDamage, *OtherActor->GetName(), *GetNameSafe(this), *GetNameSafe(InstigatorController));
-                OtherActor->TakeDamage(BaseDamage, DamageEvent, InstigatorController, this);
-            }
+            AController* InstigatorController = GetInstigatorController();
+            
+            UE_LOG(LogSolaraqProjectile, Log, TEXT("Server: Applying %.1f PointDamage to %s from %s (Instigator: %s) via Overlap"),
+                   BaseDamage, *OtherActor->GetName(), *GetNameSafe(this), *GetNameSafe(InstigatorController));
+            
+            // Apply the Damage
+            OtherActor->TakeDamage(BaseDamage, DamageEvent, InstigatorController, this);
         }
         else
         {
             UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Projectile %s overlapped something other than a ship."), *GetName());
-            // If you want projectiles to be destroyed by hitting other things (like asteroids that might also be set to overlap projectiles)
-            // you might add destruction logic here too. For now, it only destroys after hitting a ship.
+            // Optional: Logic for hitting walls, asteroids, etc.
         }
 
-        // Destroy the Projectile on the server.
-        // Clients can play effects immediately and then the actor will be destroyed.
-        if (HasAuthority())
-        {
-            SetActorHiddenInGame(true);
-            SetActorEnableCollision(false);
-            
-             UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Server: Destroying projectile %s after overlap."), *GetName());
-            Destroy();
-        }
-        else // Client-side cleanup if needed before server destruction
-        {
-            if (ProjectileMovement) ProjectileMovement->StopMovementImmediately();
-            SetActorEnableCollision(false); // Stop further overlaps locally
-            // Play client-side impact effect here if desired
-        }
+        // 3. Destroy the Projectile
+        // Hide and disable collision immediately so it doesn't hit multiple things while waiting to be destroyed
+        SetActorHiddenInGame(true);
+        SetActorEnableCollision(false);
+        
+        UE_LOG(LogSolaraqProjectile, Verbose, TEXT("Server: Destroying projectile %s after overlap."), *GetName());
+        Destroy();
     }
 }

@@ -105,6 +105,33 @@ void ACelestialBodyBase::PostEditChangeProperty(FPropertyChangedEvent& PropertyC
         }
     }
 }
+
+FSolaraqMinimapData ACelestialBodyBase::GetMinimapData_Implementation() const
+{
+	FSolaraqMinimapData Data;
+
+	// 1. Set Type
+	Data.IconType = EMinimapIconType::Planet;
+
+	// 2. Set Visibility
+	Data.bIsVisible = true;
+
+	// 3. Set Color
+	Data.IconColor = FLinearColor::White;
+
+	// 4. Set Scale
+	if (BodyMeshComponent && MinimapReferenceRadius > 1.0f)
+	{
+		Data.IconScale = BodyMeshComponent->Bounds.SphereRadius / MinimapReferenceRadius;
+	}
+	else
+	{
+		Data.IconScale = 1.0f;
+	}
+
+	return Data;
+}
+
 #endif // WITH_EDITOR
 
 void ACelestialBodyBase::BeginPlay()

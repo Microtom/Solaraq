@@ -9,6 +9,7 @@
 #include "GameFramework/DamageType.h"
 #include "Engine/CollisionProfile.h"
 #include "Logging/SolaraqLogChannels.h"
+#include "Camera/CameraComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 //#include "Gameplay/Pickups/SolaraqPickupBase.h"
@@ -117,7 +118,7 @@ ASolaraqShipBase::ASolaraqShipBase()
     SpringArmComponent = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
     SpringArmComponent->SetupAttachment(RootComponent);
     SpringArmComponent->SetRelativeRotation(FRotator(-90.0f, 0.0f, 0.0f));
-    SpringArmComponent->TargetArmLength = 3000.0f;
+    SpringArmComponent->TargetArmLength = 9000.0f;
     SpringArmComponent->bEnableCameraLag = false;
     SpringArmComponent->bEnableCameraRotationLag = false;
     SpringArmComponent->bDoCollisionTest = false;
@@ -125,6 +126,11 @@ ASolaraqShipBase::ASolaraqShipBase()
     SpringArmComponent->bInheritYaw = false;
     SpringArmComponent->bInheritRoll = false;
 
+    CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
+    CameraComponent->SetupAttachment(SpringArmComponent, USpringArmComponent::SocketName); 
+    CameraComponent->bUsePawnControlRotation = false;
+    CameraComponent->FieldOfView = 52.0f; 
+    
     bReplicates = true;
     SetReplicateMovement(true);
     if(CollisionAndPhysicsRoot) CollisionAndPhysicsRoot->SetIsReplicated(true); // Replicate physics root state
@@ -1016,6 +1022,33 @@ ETeamAttitude::Type ASolaraqShipBase::GetTeamAttitudeTowards(const AActor& Other
         // if (Cast<AAIController>(OtherPawn->GetController())) return ETeamAttitude::Hostile; // Removed this as it makes all AI hostile by default
     }
     return ETeamAttitude::Neutral;
+}
+
+FSolaraqMinimapData ASolaraqShipBase::GetMinimapData_Implementation() const
+{
+    FSolaraqMinimapData Data;
+
+    // 1. Visibility: Only show if alive
+    Data.bIsVisible = !IsDead();
+    if (!Data.bIsVisible) return Data; // Early out if hidden
+
+    // 2. Logic for Player vs AI
+    if (IsLocallyControlled())
+    {
+        Data.IconType = EMinimapIconType::Player;
+        Data.IconColor = FLinearColor::Green;
+    }
+    else
+    {
+        // TODO: Add team check here later (e.g., if TeamID == PlayerTeam -> Friendly)
+        Data.IconType = EMinimapIconType::HostileShip;
+        Data.IconColor = FLinearColor::Red;
+    }
+
+    // 3. Scale: Always 1.0 (or 0.5 if your texture is huge)
+    Data.IconScale = 0.5f; 
+
+    return Data;
 }
 
 void ASolaraqShipBase::RequestInteraction()

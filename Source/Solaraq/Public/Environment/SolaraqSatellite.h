@@ -6,6 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "UI/SolaraqMinimapInterface.h"
 #include "SolaraqSatellite.generated.h" // Must be last include
 
 // Forward Declarations
@@ -20,7 +21,7 @@ class ACelestialBodyBase;
  * Requires CelestialBodyToOrbit to be assigned in the editor instance properties for orbit functionality.
  */
 UCLASS()
-class SOLARAQ_API ASolaraqSatellite : public AActor
+class SOLARAQ_API ASolaraqSatellite : public AActor, public ISolaraqMinimapInterface
 {
 	GENERATED_BODY()
 
@@ -47,6 +48,9 @@ public:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 	//~ End UObject Interface
+
+	// --- Minimap Interface ---
+	virtual FSolaraqMinimapData GetMinimapData_Implementation() const override;
 
 protected:
 	// --- Components ---
@@ -108,6 +112,10 @@ protected:
 	void UpdatePositionInEditor();
 #endif
 
+	// The world radius that equals 1.0 scale on the minimap
+	// If your mesh radius is 5000, and this is 5000, icon is drawn at 100% size (122px).
+	UPROPERTY(EditDefaultsOnly, Category = "Minimap")
+	float MinimapReferenceRadius = 5000.0f;
 };
 
 // --- END OF FILE SolaraqSatellite.h ---
