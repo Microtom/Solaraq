@@ -1,46 +1,48 @@
 // SolaraqInventoryWindowWidget.h
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Items/InventoryComponent.h"
 #include "SolaraqInventoryWindowWidget.generated.h"
 
-// Forward Declarations
-class UBorder;
-class UTextBlock;
 class USolaraqInventoryGridWidget;
+class UButton;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSolaraqInventoryClose);
 
 UCLASS()
 class SOLARAQ_API USolaraqInventoryWindowWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
-protected:
-	//~ Begin UUserWidget Interface
-	virtual void NativeConstruct() override;
-	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-	virtual bool NativeSupportsKeyboardFocus() const override;
-	//~ End UUserWidget Interface
-
 public:
-	void SetMoneyText(int32 Amount);
-	
+	virtual void NativeConstruct() override;
+
+	UPROPERTY(BlueprintAssignable, Category = "Solaraq|Events")
+	FOnSolaraqInventoryClose OnCloseRequested;
+
 protected:
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UBorder> Header_Border;
-
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UTextBlock> MoneyText_Block;
-
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<USolaraqInventoryGridWidget> WBP_InventoryGrid;
-
-private:
-	// We are back to needing the DragOffset.
-	FVector2D DragOffset;
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation) override;
+	virtual FReply NativeOnMouseButtonDoubleClick(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	
-	bool bIsDragging = false;
+	UFUNCTION()
+	void RefreshWindow();
+
+	UFUNCTION()
+	void HandleGridDrop(const FPlacedItem& DroppedItem, USolaraqInventoryGridWidget* SourceGrid, USolaraqInventoryGridWidget* TargetGrid, FIntPoint TargetCoord);
+
+	UFUNCTION()
+	void CloseWindow();
+	
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<USolaraqInventoryGridWidget> BackpackGrid;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> CloseButton;
+	
+private:
+	UPROPERTY()
+	TObjectPtr<UInventoryComponent> InventoryComp;
 };

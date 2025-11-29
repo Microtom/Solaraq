@@ -8,10 +8,11 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "UObject/ConstructorHelpers.h"
 #include "DrawDebugHelpers.h"
-#include "Components/EquipmentComponent.h"
+#include "Items/SolaraqEquipmentComponent.h" 
 #include "Items/InventoryComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Items/ItemToolDataAsset.h"
+#include "Items/ItemArmorDataAsset.h"
 #include "Engine/World.h" 
 #include "Items/ItemConsumableDataAsset.h"
 #include "Items/ItemPickup.h"
@@ -55,7 +56,7 @@ ASolaraqCharacterPawn::ASolaraqCharacterPawn()
 
     // Create an inventory component
     InventoryComponent = CreateDefaultSubobject<UInventoryComponent>(TEXT("InventoryComponent"));
-    EquipmentComponent = CreateDefaultSubobject<UEquipmentComponent>(TEXT("EquipmentComponent"));
+    EquipmentComponent = CreateDefaultSubobject<USolaraqEquipmentComponent>(TEXT("EquipmentComponent"));
 
     NormalMaxWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
     
@@ -206,39 +207,137 @@ void ASolaraqCharacterPawn::DropItem(UItemDataAssetBase* ItemData, int32 Quantit
     }
 }
 
+void ASolaraqCharacterPawn::SitDown(USceneComponent* SeatAnchor)
+{
+    if (!SeatAnchor) return;
+
+    // 1. Disable Movement
+    if (GetCharacterMovement())
+    {
+        GetCharacterMovement()->DisableMovement();
+        GetCharacterMovement()->StopMovementImmediately();
+    }
+
+    // 2. Disable Collision with the Chair so we don't glitch out
+    // (Assuming the SeatAnchor's owner is the chair actor)
+    if (SeatAnchor->GetOwner())
+    {
+        GetCapsuleComponent()->IgnoreActorWhenMoving(SeatAnchor->GetOwner(), true);
+    }
+
+    // 3. Attach to the socket
+    FAttachmentTransformRules AttachmentRules(
+        EAttachmentRule::SnapToTarget, // Location
+        EAttachmentRule::SnapToTarget, // Rotation
+        EAttachmentRule::KeepWorld,
+        false// Scale
+    );
+    AttachToComponent(SeatAnchor, AttachmentRules);
+
+    // 4. Set State (For Animation)
+    bIsSitting = true;
+    
+    // Optional: Cancel any current velocity
+    SetActorEnableCollision(false); // Often easier to just disable capsule collision entirely while seated
+}
+
+void ASolaraqCharacterPawn::StandUp()
+{
+    if (!bIsSitting) return;
+
+    // 1. Detach
+    DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+    // 2. Re-enable collision
+    SetActorEnableCollision(true);
+    
+    // 3. Re-enable movement
+    if (GetCharacterMovement())
+    {
+        GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+    }
+
+    // 4. Move slightly forward so we aren't inside the chair
+    const FVector ExitLoc = GetActorLocation() + (GetActorForwardVector() * 80.0f);
+    SetActorLocation(ExitLoc, true); // Sweep=true to avoid walls
+
+    // 5. Set State
+    bIsSitting = false;
+}
+
 void ASolaraqCharacterPawn::BeginPlay()
 {
     Super::BeginPlay();
     
+    UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] Pawn BeginPlay Started."));
+
+    // --- FIX: ROBUST COMPONENT RETRIEVAL ---
+    // If Blueprint serialization wiped the pointers, find them manually.
+    if (!InventoryComponent) 
+    {
+        InventoryComponent = FindComponentByClass<UInventoryComponent>();
+        if (InventoryComponent) UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] Recovered InventoryComponent via FindComponentByClass."));
+    }
+
+    if (!EquipmentComponent) 
+    {
+        EquipmentComponent = FindComponentByClass<USolaraqEquipmentComponent>();
+        if (EquipmentComponent) UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] Recovered EquipmentComponent via FindComponentByClass."));
+    }
+    // ---------------------------------------
+
     if (InventoryComponent && EquipmentComponent)
     {
-        // Load the Data Asset we created in the editor
-        UItemToolDataAsset* RodData = LoadObject<UItemToolDataAsset>(nullptr, TEXT("/Game/Items/Tools/FishingRods/BasicFishingRod/DA_BasicFishingRod.DA_BasicFishingRod"));
+        // 1. Fishing Rod
+        const TCHAR* RodPath = TEXT("/Game/Items/Tools/FishingRods/BasicFishingRod/DA_BasicFishingRod.DA_BasicFishingRod");
+        UItemToolDataAsset* RodData = LoadObject<UItemToolDataAsset>(nullptr, RodPath);
+        
         if (RodData)
         {
+            UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] LOAD SUCCESS: Rod Data Asset found. Adding to inventory..."));
             InventoryComponent->AddItem(RodData, 1);
-            EquipmentComponent->EquipItem(RodData);
-            UE_LOG(LogTemp, Warning, TEXT("TEST: Gave player a fishing rod."));
-        }
-
-        UItemConsumableDataAsset* AppleData = LoadObject<UItemConsumableDataAsset>(nullptr, TEXT("/Game/Items/Consumables/DA_Apple.DA_Apple"));
-        if (AppleData)
-        {
-            // Give 5 apples. The AddItem function will handle stacking.
-            const int32 UnaddedQuantity = InventoryComponent->AddItem(AppleData, 5);
-            if (UnaddedQuantity > 0)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("TEST: Could not add %d apples to inventory (full?)."), UnaddedQuantity);
-            }
-            else
-            {
-                UE_LOG(LogTemp, Warning, TEXT("TEST: Gave player 5 apples."));
-            }
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("TEST: Failed to load DA_Apple. Make sure it exists at '/Game/Items/Consumables/DA_Apple'."));
+            // Right-click your DataAsset in Editor -> Copy Reference to fix this path if it fails
+            UE_LOG(LogTemp, Error, TEXT("[DEBUG_INV] LOAD FAILED: Could not find object at path: %s"), RodPath);
         }
+
+        // 2. Apple
+        const TCHAR* Berry_Cola_Path = TEXT("/Game/Items/Consumables/DA_Berry_Cola.DA_Berry_Cola");
+        UItemConsumableDataAsset* Berry_Cola_Data = LoadObject<UItemConsumableDataAsset>(nullptr, Berry_Cola_Path);
+        
+        if (Berry_Cola_Data)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] LOAD SUCCESS: Apple Data Asset found. Adding 5..."));
+            const int32 UnaddedQuantity = InventoryComponent->AddItem(Berry_Cola_Data, 5);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("[DEBUG_INV] LOAD FAILED: Could not find object at path: %s"), Berry_Cola_Path);
+        }
+
+        // 3. Helmet
+        const TCHAR* HelmetPath = TEXT("/Game/Items/Wearables/Head/BasicHelmet/DA_BasicHelmet.DA_BasicHelmet");
+        UItemArmorDataAsset* HelmetData = LoadObject<UItemArmorDataAsset>(nullptr, HelmetPath);
+        
+        if (HelmetData)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] LOAD SUCCESS: Helmet Data Asset found. Adding..."));
+            InventoryComponent->AddItem(HelmetData, 1);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("[DEBUG_INV] LOAD FAILED: Could not find object at path: %s"), HelmetPath);
+        }
+        
+        UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] Pawn BeginPlay Finished. Inventory Total Items: %d"), InventoryComponent->GetPlacedItems().Num());
+    }
+    else
+    {
+        // Specific Error Logging
+        if (!InventoryComponent) UE_LOG(LogTemp, Error, TEXT("[DEBUG_INV] CRITICAL: InventoryComponent is still NULL after recovery attempt!"));
+        if (!EquipmentComponent) UE_LOG(LogTemp, Error, TEXT("[DEBUG_INV] CRITICAL: EquipmentComponent is still NULL after recovery attempt!"));
     }
 }
 

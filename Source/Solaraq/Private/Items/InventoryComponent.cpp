@@ -1,6 +1,6 @@
 // InventoryComponent.cpp
 #include "Items/InventoryComponent.h"
-
+#include "Items/SolaraqEquipmentComponent.h" 
 #include "Items/ItemConsumableDataAsset.h"
 #include "Items/ItemDataAssetBase.h"
 #include "Kismet/GameplayStatics.h"
@@ -84,6 +84,34 @@ bool UInventoryComponent::CanMoveItemTo(const FGuid& ItemID, FIntPoint NewTopLef
     return bSpaceIsFree;
 }
 
+bool UInventoryComponent::TransferItemTo(UInventoryComponent* TargetInventory, const FGuid& ItemID, FIntPoint TargetPos)
+{
+    if (!TargetInventory || TargetInventory == this) return false;
+
+    // 1. Find the item in this inventory
+    const int32 Index = PlacedItems.IndexOfByPredicate([&](const FPlacedItem& Item){ return Item.ItemID == ItemID; });
+    if (Index == INDEX_NONE) return false;
+
+    FPlacedItem ItemToTransfer = PlacedItems[Index];
+
+    // 2. Check if the Target location is free in the TargetInventory
+    // We use the helper we already have in the target component
+    // Note: IsAreaFree is private, so we might need to expose it or use AddItemAt
+    
+    // Attempt to add it to the target at the specific location
+    if (TargetInventory->AddItemAt(ItemToTransfer, TargetPos))
+    {
+        // 3. Success! Remove it from this inventory
+        RemoveItem(ItemID, ItemToTransfer.Quantity);
+        
+        UE_LOG(LogTemp, Log, TEXT("Transferred item '%s' to external inventory."), *ItemToTransfer.ItemData->DisplayName.ToString());
+        return true;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Transfer failed: Target location occupied or invalid."));
+    return false;
+}
+
 void UInventoryComponent::BeginPlay()
 {
     Super::BeginPlay();
@@ -138,8 +166,13 @@ bool UInventoryComponent::FindFreeSpot(FIntPoint Dimensions, FIntPoint& OutTopLe
 
 int32 UInventoryComponent::AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity)
 {
+    UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] AddItem Called. Item: %s, Quantity: %d"), 
+        ItemToAdd ? *ItemToAdd->GetName() : TEXT("NULL"), 
+        Quantity);
+
     if (!ItemToAdd || Quantity <= 0)
     {
+        UE_LOG(LogTemp, Error, TEXT("[DEBUG_INV] AddItem Aborted: Invalid Item or Quantity <= 0"));
         return Quantity;
     }
 
@@ -154,11 +187,15 @@ int32 UInventoryComponent::AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity
             {
                 const int32 SpaceInStack = ItemToAdd->MaxStackSize - Item.Quantity;
                 const int32 AmountToAdd = FMath::Min(QuantityRemaining, SpaceInStack);
+                
+                UE_LOG(LogTemp, Log, TEXT("[DEBUG_INV] Stacking %d items onto existing stack at %s"), AmountToAdd, *Item.TopLeft.ToString());
+                
                 Item.Quantity += AmountToAdd;
                 QuantityRemaining -= AmountToAdd;
 
                 if (QuantityRemaining <= 0)
                 {
+                    UE_LOG(LogTemp, Log, TEXT("[DEBUG_INV] All items stacked. Broadcasting Update."));
                     OnInventoryUpdated.Broadcast();
                     return 0; // All items stacked.
                 }
@@ -168,18 +205,21 @@ int32 UInventoryComponent::AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity
     
     // 2. Place remaining quantity into new slots.
     const FIntPoint ItemDimensions = ItemToAdd->Dimensions;
+    UE_LOG(LogTemp, Log, TEXT("[DEBUG_INV] Attempting to place new item. Dimensions: %s. Remaining Qty: %d"), *ItemDimensions.ToString(), QuantityRemaining);
+
     while (QuantityRemaining > 0)
     {
         FIntPoint FoundSpot;
         if (FindFreeSpot(ItemDimensions, FoundSpot))
         {
-            // We found a free spot. Place the item.
             const int32 AmountToAdd = ItemToAdd->bIsStackable ? FMath::Min(QuantityRemaining, ItemToAdd->MaxStackSize) : 1;
             
+            UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] FOUND SPOT at %s. Placing %d items. ItemID: %s"), 
+                *FoundSpot.ToString(), AmountToAdd, *ItemToAdd->GetName());
+
             PlacedItems.Emplace(ItemToAdd, AmountToAdd, FoundSpot);
             QuantityRemaining -= AmountToAdd;
 
-            // For non-stackable items, we must loop again to place the next one.
             if (!ItemToAdd->bIsStackable && QuantityRemaining > 0)
             {
                 continue;
@@ -187,13 +227,36 @@ int32 UInventoryComponent::AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity
         }
         else
         {
-            // No more room in the inventory for an item of this size.
+            UE_LOG(LogTemp, Error, TEXT("[DEBUG_INV] FAILED TO FIND SPOT for item %s. Grid full or item too big."), *ItemToAdd->GetName());
             break;
         }
     }
 
+    UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] AddItem Complete. Final PlacedItems Count: %d. Broadcasting OnInventoryUpdated."), PlacedItems.Num());
     OnInventoryUpdated.Broadcast();
-    return QuantityRemaining; // Return any un-added quantity.
+    return QuantityRemaining; 
+}
+
+bool UInventoryComponent::AddItemAt(const FPlacedItem& Item, FIntPoint TopLeft)
+{
+    if (!Item.ItemData) return false;
+
+    // Check if space is free
+    if (IsAreaFree(TopLeft, Item.ItemData->Dimensions))
+    {
+        FPlacedItem NewItem = Item;
+        NewItem.TopLeft = TopLeft;
+        
+        // Ensure ID is preserved or generated as needed. 
+        // If moving from equipment, we usually keep the ID or generate a new one. 
+        // FPlacedItem copy constructor keeps the ID.
+
+        PlacedItems.Add(NewItem);
+        OnInventoryUpdated.Broadcast();
+        return true;
+    }
+    
+    return false;
 }
 
 void UInventoryComponent::UseItem(const FGuid& ItemID)
@@ -223,6 +286,55 @@ void UInventoryComponent::UseItem(const FGuid& ItemID)
     
     UE_LOG(LogSolaraqSystem, Log, TEXT("Attempting to use item: %s"), *ItemData->DisplayName.ToString());
 
+    // =========================================================================
+    // EQUIPMENT LOGIC
+    // =========================================================================
+    
+    // 1. Check if the item is designed for an equipment slot (Head, Body, etc.)
+    if (ItemData->EquipmentSlot != EEquipmentSlot::None)
+    {
+        // 2. Try to find the Equipment Component on the owner (Player)
+        if (USolaraqEquipmentComponent* EquipComp = Owner->FindComponentByClass<USolaraqEquipmentComponent>())
+        {
+            FPlacedItem PreviousItem;
+
+            // 3. Attempt to Equip the item.
+            // We pass *ItemToUse. The function makes a copy internally to store in the equipment map.
+            bool bEquipSuccess = EquipComp->EquipItem(*ItemToUse, ItemData->EquipmentSlot, PreviousItem);
+
+            if (bEquipSuccess)
+            {
+                UE_LOG(LogSolaraqSystem, Log, TEXT("Successfully equipped %s into slot %d"), 
+                    *ItemData->DisplayName.ToString(), (int32)ItemData->EquipmentSlot);
+
+                // 4. Remove the item from the Inventory (Backpack)
+                // We typically remove 1 quantity.
+                RemoveItem(ItemID, 1);
+
+                // 5. Handle Swapping
+                // If there was already a helmet on, EquipItem returns it in 'PreviousItem'.
+                // We need to put that old helmet back into the backpack.
+                if (PreviousItem.IsValid())
+                {
+                    AddItem(PreviousItem.ItemData, PreviousItem.Quantity);
+                    UE_LOG(LogSolaraqSystem, Log, TEXT("Swapped items. Returned %s to inventory."), 
+                        *PreviousItem.ItemData->DisplayName.ToString());
+                }
+            }
+            else
+            {
+                UE_LOG(LogSolaraqSystem, Warning, TEXT("Failed to equip item. Slot mismatch or internal error."));
+            }
+        }
+        else
+        {
+            UE_LOG(LogSolaraqSystem, Error, TEXT("Owner does not have an EquipmentComponent!"));
+        }
+
+        // If it was equipment, we are done. Return here so we don't try to 'consume' it below.
+        return;
+    }
+    
     // Branch logic based on the item type
     switch (ItemData->ItemType)
     {
@@ -269,12 +381,14 @@ void UInventoryComponent::UseItem(const FGuid& ItemID)
 
 void UInventoryComponent::RemoveItem(const FGuid& ItemID, int32 QuantityToRemove)
 {
+    // Debug log
+    // UE_LOG(LogTemp, Log, TEXT("[DEBUG_INV] RemoveItem Requested. ID: %s"), *ItemID.ToString());
+
     if (!ItemID.IsValid() || QuantityToRemove <= 0)
     {
         return;
     }
 
-    // Find the index of the item to remove. We iterate backwards so removing is safe.
     const int32 ItemIndex = PlacedItems.FindLastByPredicate([&ItemID](const FPlacedItem& Item)
     {
         return Item.ItemID == ItemID;
@@ -285,13 +399,27 @@ void UInventoryComponent::RemoveItem(const FGuid& ItemID, int32 QuantityToRemove
         FPlacedItem& Item = PlacedItems[ItemIndex];
         Item.Quantity -= QuantityToRemove;
 
-        // If the stack is empty, remove the item entirely
         if (Item.Quantity <= 0)
         {
             PlacedItems.RemoveAt(ItemIndex);
+            UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] RemoveItem Success. Item completely removed."));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[DEBUG_INV] RemoveItem Partial. Remaining Qty: %d"), Item.Quantity);
         }
 
         OnInventoryUpdated.Broadcast();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("[DEBUG_INV] RemoveItem FAILED. Could not find Item ID: %s in PlacedItems list!"), *ItemID.ToString());
+        
+        // --- DEBUG: Print all known IDs to compare ---
+        for(const FPlacedItem& Existing : PlacedItems)
+        {
+            UE_LOG(LogTemp, Log, TEXT("   -> Existing Item: %s | ID: %s"), *Existing.ItemData->GetName(), *Existing.ItemID.ToString());
+        }
     }
 }
 

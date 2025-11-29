@@ -5,14 +5,14 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Items/InventoryComponent.h"
-#include "Components/EquipmentComponent.h" 
 #include "SolaraqCharacterPawn.generated.h"
 
 class AItemPickup;
 class UCameraComponent;
 class USpringArmComponent;
 class UInventoryComponent;
-class UEquipmentComponent;
+class USolaraqEquipmentComponent;
+
 
 UENUM(BlueprintType)
 enum class ERejoinInterpolationType : uint8
@@ -30,7 +30,8 @@ public:
 	ASolaraqCharacterPawn();
 
 	FORCEINLINE class UInventoryComponent* GetInventoryComponent() const { return InventoryComponent; }
-	FORCEINLINE class UEquipmentComponent* GetEquipmentComponent() const { return EquipmentComponent; }
+	// Update getter if you have one
+	FORCEINLINE USolaraqEquipmentComponent* GetEquipmentComponent() const { return EquipmentComponent; }
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fishing")
 	float FishingCameraRadius = 800.f;
@@ -59,6 +60,16 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Solaraq|Inventory")
 	void DropItem(UItemDataAssetBase* ItemData, int32 Quantity);
+
+	// Called by the Chair when we are allowed to sit
+	void SitDown(USceneComponent* SeatAnchor);
+
+	// Called when we press interact again, or move away
+	void StandUp();
+	
+	// Helper to check state for Animation Blueprints
+	UFUNCTION(BlueprintCallable, Category = "State")
+	bool IsSitting() const { return bIsSitting; }
 	
 protected:
 	virtual void BeginPlay() override;
@@ -95,14 +106,16 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
 	TObjectPtr<UInventoryComponent> InventoryComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment") // <-- Add this
-	TObjectPtr<UEquipmentComponent> EquipmentComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USolaraqEquipmentComponent> EquipmentComponent; 
 	
  	// (Optional) A small delay once max offset is reached before forced rejoin begins.
  	// If 0, rejoin starts immediately once max offset is hit.
  	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
  	float DelayBeforeForcedRejoin = 0.25f;
 
+	UPROPERTY(Replicated) // Add to GetLifetimeReplicatedProps if multiplayer
+	bool bIsSitting = false;
 	
 	
 private:

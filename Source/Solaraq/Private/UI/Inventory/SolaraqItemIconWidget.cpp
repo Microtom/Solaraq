@@ -1,134 +1,216 @@
 // SolaraqItemIconWidget.cpp
 
-#include "UI/Inventory/SolaraqItemIconWidget.h" // Adjust path as needed
-
+#include "UI/Inventory/SolaraqItemIconWidget.h" 
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Items/ItemDataAssetBase.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/SizeBox.h" 
+#include "Items/SolaraqEquipmentComponent.h"
 #include "UI/Inventory/SolaraqInventoryGridWidget.h"
 #include "UI/Inventory/SolaraqItemDragOperation.h"
 
 void USolaraqItemIconWidget::Initialize(const FPlacedItem& InItemInfo, USolaraqInventoryGridWidget* InOwningGrid)
 {
-	// It's helpful to have a name for the widget instance for logging clarity.
-    const FString WidgetName = GetName();
+    this->ItemInfo = InItemInfo;
+    this->OwningGrid = InOwningGrid;
+    
+    if (!ItemInfo.ItemData) return;
 
-	// Store the item info for later use (e.g., if the player starts dragging this widget).
-	this->ItemInfo = InItemInfo;
-	this->OwningGrid = InOwningGrid;
-	
-	// --- VALIDATION LOGGING ---
-	if (!ItemInfo.ItemData)
-	{
-		return;
-	}
+    UTexture2D* IconTexture = ItemInfo.ItemData->Icon;
+    
+    // --- LAYOUT FIX ---
+    // Ensure inner components fill the widget so the Grid controls the size.
+    if (ItemButton)
+    {
+        if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(ItemButton->Slot))
+        {
+            CanvasSlot->SetAutoSize(false); 
+            CanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f)); 
+            CanvasSlot->SetOffsets(FMargin(0.f)); 
+        }
 
-	if (!ItemIcon)
-	{
-		return;
-	}
-	if (!QuantityText)
-	{
-		return;
-	}
+        ItemButton->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
 
-	// --- ICON LOGIC & LOGGING ---
-	UTexture2D* IconTexture = ItemInfo.ItemData->Icon;
-	if (IconTexture)
-	{
-		ItemIcon->SetBrushFromTexture(IconTexture);
-		// Ensure tint is reset to white in case a recycled widget was previously colored.
-		ItemIcon->SetColorAndOpacity(FLinearColor::White);
-		ItemIcon->SetVisibility(ESlateVisibility::Visible);
-	}
-	else
-	{
-		// This is a very common cause of "invisible" items. Instead of hiding the widget,
-		// we'll use the UImage as a colored background as you suggested. This makes it clear
-		// that the item widget is being placed correctly, but its Data Asset is missing the icon texture.
-		ItemIcon->SetBrushFromTexture(nullptr); // Clear any texture from the brush
-		ItemIcon->SetColorAndOpacity(FLinearColor(0.1f, 0.1f, 0.15f, 0.8f)); // Set a dark, semi-transparent background color
-		ItemIcon->SetVisibility(ESlateVisibility::Visible); // Crucially, ensure it is visible
-	}
+    if (ItemIcon)
+    {
+        if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(ItemIcon->Slot))
+        {
+            CanvasSlot->SetAutoSize(false); 
+            CanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f)); 
+            CanvasSlot->SetOffsets(FMargin(0.f)); 
+        }
 
-	// --- QUANTITY TEXT LOGIC & LOGGING ---
-	if (ItemInfo.ItemData->bIsStackable && ItemInfo.Quantity > 1)
-	{
-		QuantityText->SetText(FText::AsNumber(ItemInfo.Quantity));
-		QuantityText->SetVisibility(ESlateVisibility::Visible);
-	}
-	else
-	{
-		// Otherwise, hide the text block completely.
-		QuantityText->SetVisibility(ESlateVisibility::Collapsed);
-	}
+        if (IconTexture)
+        {
+            ItemIcon->SetBrushFromTexture(IconTexture);
+            ItemIcon->SetColorAndOpacity(FLinearColor::White);
+            ItemIcon->SetVisibility(ESlateVisibility::Visible);
+        }
+        else
+        {
+            ItemIcon->SetBrushFromTexture(nullptr); 
+            ItemIcon->SetColorAndOpacity(FLinearColor(0.1f, 0.1f, 0.15f, 0.8f)); 
+            ItemIcon->SetVisibility(ESlateVisibility::Visible); 
+        }
+    }
+
+    if (QuantityText)
+    {
+        if (ItemInfo.ItemData->bIsStackable && ItemInfo.Quantity > 1)
+        {
+            QuantityText->SetText(FText::AsNumber(ItemInfo.Quantity));
+            QuantityText->SetVisibility(ESlateVisibility::Visible);
+        }
+        else
+        {
+            QuantityText->SetVisibility(ESlateVisibility::Collapsed);
+        }
+    }
 }
 
 FReply USolaraqItemIconWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+    Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
 
-	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-	{
-		// Detect a drag operation. This will call OnDragDetected if the mouse moves far enough.
-		return UWidgetBlueprintLibrary::DetectDragIfPressed(InMouseEvent, this, EKeys::LeftMouseButton).NativeReply;
-	}
+    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+    {
+        FEventReply Reply = UWidgetBlueprintLibrary::DetectDragIfPressed(InMouseEvent, this, EKeys::LeftMouseButton);
+        
+        // If a drag was detected, return that reply.
+        if (Reply.NativeReply.IsEventHandled())
+        {
+            return Reply.NativeReply;
+        }
 
-	return FReply::Unhandled();
+        // --- FIX CLICK-THROUGH BUG ---
+        // If we clicked but didn't drag, we MUST return Handled(). 
+        // Otherwise, the controller gets the click and moves the character.
+        return FReply::Handled();
+    }
+
+    return FReply::Unhandled();
+}
+
+FReply USolaraqItemIconWidget::NativeOnMouseButtonDoubleClick(const FGeometry& InGeometry,
+    const FPointerEvent& InMouseEvent)
+{
+    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+    {
+        if (OwningGrid)
+        {
+            APawn* OwningPawn = GetOwningPlayerPawn();
+            if (!OwningPawn) return FReply::Unhandled();
+
+            // CASE 1: The icon is in the Inventory (Backpack)
+            // The grid has a reference to the InventoryComponent.
+            if (UInventoryComponent* InvComp = OwningGrid->GetContextInventory())
+            {
+                // "Use" the item (Consumes it or Equips it)
+                InvComp->UseItem(ItemInfo.ItemID);
+                return FReply::Handled();
+            }
+
+            // CASE 2: The icon is in an Equipment Slot
+            // The grid has NO ContextInventory, so we check the EquipmentComponent.
+            if (USolaraqEquipmentComponent* EquipComp = OwningPawn->FindComponentByClass<USolaraqEquipmentComponent>())
+            {
+                // Check if the item we clicked is actually equipped in the slot it claims to belong to.
+                if (ItemInfo.ItemData)
+                {
+                    EEquipmentSlot EquipmentSlotSlot = ItemInfo.ItemData->EquipmentSlot;
+                    FPlacedItem EquippedItem;
+
+                    // Does the component agree that there is an item in this slot?
+                    if (EquipComp->GetItemInSlot(EquipmentSlotSlot, EquippedItem))
+                    {
+                        // Does the ID match the widget's ID? (Safety check)
+                        if (EquippedItem.ItemID == ItemInfo.ItemID)
+                        {
+                            // UNEQUIP LOGIC:
+                            // 1. Remove from Equipment
+                            FPlacedItem RemovedItem;
+                            if (EquipComp->UnequipItem(EquipmentSlotSlot, RemovedItem))
+                            {
+                                // 2. Add back to Inventory
+                                if (UInventoryComponent* InvComp = OwningPawn->FindComponentByClass<UInventoryComponent>())
+                                {
+                                    int32 LeftOver = InvComp->AddItem(RemovedItem.ItemData, RemovedItem.Quantity);
+                                    
+                                    // Edge Case: Inventory is full?
+                                    if (LeftOver > 0)
+                                    {
+                                        // If we couldn't add it back, strictly speaking we should re-equip it
+                                        // or drop it on the ground. For now, let's just log a warning.
+                                        UE_LOG(LogTemp, Warning, TEXT("Inventory full! Unequipped item lost (or implement Drop logic here)."));
+                                        
+                                        // Optional: Re-equip if full
+                                        // FPlacedItem Dummy;
+                                        // EquipComp->EquipItem(RemovedItem, Slot, Dummy);
+                                    }
+                                }
+                            }
+                            // CRITICAL: Return Handled so the character doesn't move!
+                            return FReply::Handled();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return FReply::Unhandled();
 }
 
 void USolaraqItemIconWidget::NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation)
 {
-	Super::NativeOnDragDetected(InGeometry, InMouseEvent, OutOperation);
+    Super::NativeOnDragDetected(InGeometry, InMouseEvent, OutOperation);
 
-	if (!ItemInfo.IsValid()) return;
-    
-    // Get the parent grid widget. This relies on the UMG hierarchy: ItemIcon -> CanvasPanel -> GridWidget
-	if (!OwningGrid)
-	{
-		return;
-	}
+    if (!ItemInfo.IsValid()) return;
+    if (!OwningGrid) return;
 
-    // --- KEY CHANGE: Refresh the grid BEFORE creating the drag operation ---
-    // 1. Tell the grid to ignore this specific item on its next refresh.
+    // 1. Calculate Target Size
+    float SlotSize = OwningGrid->GetSlotPixelSize();
+    float Width = ItemInfo.ItemData->Dimensions.X * SlotSize;
+    float Height = ItemInfo.ItemData->Dimensions.Y * SlotSize;
+
+    // 2. Hide original
     OwningGrid->SetItemToIgnore(this->ItemInfo.ItemID);
-    // 2. Trigger the refresh. The grid will now redraw without this item, showing empty 1x1 slots.
-    OwningGrid->RefreshInventory();
+    OwningGrid->Redraw();
 
-	// --- Now, proceed with creating the drag operation as before ---
-	USolaraqItemDragOperation* DragOperation = NewObject<USolaraqItemDragOperation>();
-	if (!DragOperation)
-	{
-        OwningGrid->ClearIgnoredItem(); // Clean up if we fail
-        OwningGrid->RefreshInventory();
-		return;
-	}
+    USolaraqItemDragOperation* DragOperation = NewObject<USolaraqItemDragOperation>();
+    if (!DragOperation)
+    {
+        OwningGrid->ClearIgnoredItem(); 
+        OwningGrid->Redraw();
+        return;
+    }
 
-	// Create the drag visual
-	USolaraqItemIconWidget* DragVisual = CreateWidget<USolaraqItemIconWidget>(GetOwningPlayer(), GetClass());
-	if(DragVisual)
-	{
-		DragVisual->Initialize(this->ItemInfo, nullptr);
-		DragVisual->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.7f));
-		DragOperation->DefaultDragVisual = DragVisual;
-	}
+    // 3. Create Drag Visual
+    USolaraqItemIconWidget* IconVisual = CreateWidget<USolaraqItemIconWidget>(GetOwningPlayer(), GetClass());
+    if(IconVisual)
+    {
+        IconVisual->Initialize(this->ItemInfo, nullptr);
+        IconVisual->SetColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, 0.7f));
+        
+        // Use SizeBox to force the dimensions during drag
+        USizeBox* SizingWrapper = NewObject<USizeBox>(this);
+        SizingWrapper->SetWidthOverride(Width);
+        SizingWrapper->SetHeightOverride(Height);
+        
+        SizingWrapper->SetContent(IconVisual);
+        
+        DragOperation->DefaultDragVisual = SizingWrapper;
+    }
 
-	// Configure the operation payload
-	DragOperation->Pivot = EDragPivot::MouseDown;
-	DragOperation->ItemInfo = this->ItemInfo;
-	DragOperation->DragOffset = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+    DragOperation->Pivot = EDragPivot::MouseDown;
+    DragOperation->ItemInfo = this->ItemInfo;
+    DragOperation->DragOffset = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
 
-	
-    // Give the operation a reference to the grid for cancellation handling
     DragOperation->SourceGrid = OwningGrid; 
-
-	// Pass the highlight widget class from the grid to the operation so it knows what to spawn.
-	DragOperation->HighlightWidgetClass = OwningGrid->GetHighlightWidgetClass();
-	
-	OutOperation = DragOperation;
-
-	UE_LOG(LogTemp, Log, TEXT("ItemIcon: Drag Detected for item '%s'. Operation created."), *ItemInfo.ItemData->DisplayName.ToString());
+    DragOperation->HighlightWidgetClass = OwningGrid->GetHighlightWidgetClass();
+    
+    OutOperation = DragOperation;
 }

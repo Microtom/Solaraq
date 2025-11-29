@@ -90,6 +90,9 @@ public:
     int32 AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity);
 
     UFUNCTION(BlueprintCallable, Category = "Inventory")
+    bool AddItemAt(const FPlacedItem& Item, FIntPoint TopLeft);
+    
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
     void UseItem(const FGuid& ItemID);
     
     // The main function to remove a quantity of a specific item.
@@ -113,6 +116,10 @@ public:
 
     /** Checks if an item can be moved to a new location without actually moving it. */
     bool CanMoveItemTo(const FGuid& ItemID, FIntPoint NewTopLeft);
+
+    /** Moves an item from this inventory to a Target Inventory Component. */
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    bool TransferItemTo(UInventoryComponent* TargetInventory, const FGuid& ItemID, FIntPoint TargetPos);
     
     /** Returns the configured width of the inventory grid. */
     UFUNCTION(BlueprintPure, Category = "Inventory|Grid")

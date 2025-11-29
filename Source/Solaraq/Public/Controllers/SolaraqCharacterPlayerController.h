@@ -5,15 +5,19 @@
 #include "CoreMinimal.h"
 #include "Controllers/SolaraqBasePlayerController.h" // Inherit from our new base
 #include "Pawns/SolaraqCharacterPawn.h"
+#include "Actors/Interactables/InteractableChair.h"
 #include "SolaraqCharacterPlayerController.generated.h"
 
+class USolaraqEquipmentWindowWidget;
 class USolaraqHUDWidget;
 class USolaraqInventoryWindowWidget;
 struct FInputActionValue;
 // Forward Declarations
 class UInputMappingContext;
 class UInputAction;
+class USolaraqContainerWindowWidget;
 class ASolaraqCharacterPawn;
+
 
 UCLASS()
 class SOLARAQ_API ASolaraqCharacterPlayerController : public ASolaraqBasePlayerController
@@ -30,6 +34,8 @@ public:
     void ShowFishingHUD();
     /** Hides and cleans up the fishing HUD widget. */
     void HideFishingHUD();
+
+    void MoveToAndInteract(AInteractableChair* TargetChair);
     
 protected:
     //~ Begin ASolaraqBasePlayerController Interface (Overrides)
@@ -72,6 +78,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
     TObjectPtr<UInputAction> PointerMoveAction;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
+    TObjectPtr<UInputAction> ToggleEquipmentWindowAction;
+    
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Input|Character")
     TObjectPtr<UInputAction> CameraZoomAction; // For the mouse wheel
 
@@ -153,6 +162,12 @@ protected:
     /** Instance of the character inventory grid widget. */
     UPROPERTY()
     TObjectPtr<USolaraqInventoryWindowWidget> CharacterInventoryWidgetInstance;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
+    TSubclassOf<USolaraqEquipmentWindowWidget> EquipmentWindowWidgetClass;
+    
+    UPROPERTY()
+    TObjectPtr<USolaraqEquipmentWindowWidget> EquipmentWindowInstance;
     
     // --- Input Handling Functions (Character & Shared Handlers) ---
     void HandlePointerMove(const FInputActionValue& Value);
@@ -163,11 +178,18 @@ protected:
     void HandleSecondaryUseCompleted();
     void HandleToggleFishingMode();
     void HandleCharacterToggleInventory();
+    void HandleToggleEquipmentWindow();
     void HandleCharacterMoveInput(const FInputActionValue& Value);
     void HandleCameraZoom(const FInputActionValue& Value);
     void MoveToDestination(const FVector& Destination);
     void HandleSprintStarted(const FInputActionValue& Value);
     void HandleSprintCompleted(const FInputActionValue& Value);
+
+    UFUNCTION()
+    void OnInventoryClosedByUI();
+
+    UFUNCTION()
+    void OnEquipmentClosedByUI();
     
 private:
     // No longer need specific PossessedCharacterPawn, GetControlledCharacter() will cast GetPawn()
@@ -190,12 +212,23 @@ private:
     // --- Inventory Window State Management ---
 
     /** The last known position of the inventory window, to be persisted across toggles. */
+    UPROPERTY()
     FVector2D LastInventoryPosition;
+    UPROPERTY()
+    FVector2D LastEquipmentPosition;
 
     /** Flag to check if we have a custom position saved, or if we should use the default centered position. */
     bool bIsInventoryPositionSet = false;
+    bool bIsEquipmentPositionSet;
     
     void CreateHUD();
 	
     bool bIsMaxOffsetReached = false;        // True if current offset is at/near max
+
+    // The chair we are currently walking towards
+    UPROPERTY()
+    AInteractableChair* PendingInteractionChair;
+
+    // How close we need to be to the entry point to actually sit
+    float InteractionAcceptanceRadius = 10.0f;
 };

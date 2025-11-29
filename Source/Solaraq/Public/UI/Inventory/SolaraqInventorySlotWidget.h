@@ -59,4 +59,7 @@ protected:
 	// The straight piece with one border.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Solaraq|Appearance")
 	TObjectPtr<UTexture2D> StraightPieceTexture;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Solaraq|Appearance")
+	TObjectPtr<UTexture2D> FillPieceTexture;
 };

@@ -1,24 +1,15 @@
 // SolaraqInventoryGridWidget.h
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Items/InventoryComponent.h" // We need FPlacedItem
+#include "Items/InventoryComponent.h"
 #include "SolaraqInventoryGridWidget.generated.h"
 
-// Forward declarations
 class UCanvasPanel;
 class USolaraqInventorySlotWidget;
-class UInventoryComponent;
-class UButton;
-class UImage;
-class UTextBlock;
 
-/**
- * Main inventory widget that procedurally generates its grid of slots
- * and places item icons on top.
- */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnGridDropEvent, const FPlacedItem&, DroppedItem, USolaraqInventoryGridWidget*, SourceGrid, USolaraqInventoryGridWidget*, TargetGrid, FIntPoint, TargetCoord);
 
 UCLASS()
 class SOLARAQ_API USolaraqInventoryGridWidget : public UUserWidget
@@ -26,64 +17,75 @@ class SOLARAQ_API USolaraqInventoryGridWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	/** Main function to rebuild the entire inventory display from scratch. */
-	UFUNCTION(BlueprintCallable, Category = "Inventory")
-	void RefreshInventory();
+	// --- Configuration ---
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|UI")
+	void ConfigureGrid(int32 InWidth, int32 InHeight, float InSlotSize = 80.f);
 
-	/** Tells the grid to ignore a specific item during the next RefreshInventory call. */
-	void SetItemToIgnore(const FGuid& ItemID);
+	/** 
+	 * Sets the Inventory Component this grid visually represents. 
+	 * The grid does NOT listen to this component for updates (that's the Controller's job),
+	 * but it holds the reference so Drag & Drop operations can validate moves.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|UI")
+	void SetContextInventory(UInventoryComponent* InInventory);
 
-	/** Tells the grid to stop ignoring any items. */
-	void ClearIgnoredItem();
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|UI")
+	void UpdateState(const TArray<FPlacedItem>& InItems);
+
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|UI")
+	void Redraw();
+
+	// --- Getters ---
+	UFUNCTION(BlueprintPure, Category = "Solaraq|UI")
+	UInventoryComponent* GetContextInventory() const { return ContextInventory; }
 
 	float GetSlotPixelSize() const { return SlotPixelSize; }
-	UInventoryComponent* GetInventoryComponent() const { return InventoryComponent; }
 	UCanvasPanel* GetHighlightCanvas() const { return HighlightCanvas; }
 	TSubclassOf<UUserWidget> GetHighlightWidgetClass() const { return HighlightWidgetClass; }
 
-protected:
-	// Called when the widget is created. We'll use it to bind to the inventory update delegate.
-	virtual void NativeConstruct() override;
+	// --- Events & Interaction ---
+	UPROPERTY(BlueprintAssignable, Category = "Solaraq|UI")
+	FOnGridDropEvent OnItemDrop;
 
+	void SetItemToIgnore(const FGuid& ItemID);
+	void ClearIgnoredItem();
+
+protected:
 	virtual bool NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
 
-	
-	// --- UPROPERTY Bindings ---
-	// Your UMG widget hierarchy must have Canvas Panels with these exact names.
-
-	// The layer for the procedurally generated background slots.
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UCanvasPanel> SlotCanvas;
 
-	// The layer for the item icons themselves.
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UCanvasPanel> ItemIconCanvas;
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UCanvasPanel> HighlightCanvas;
-	
-	// --- Blueprint-Assignable Properties ---
 
-	// The class of our smart tile widget. Assign WBP_InventorySlot in the editor.
-	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
 	TSubclassOf<USolaraqInventorySlotWidget> InventorySlotClass;
-	
-	// The class for the item icon widget. We'll create a simple one.
-	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
-	TSubclassOf<UUserWidget> ItemIconClass; // We'll need to create this simple widget
 
-	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
+	TSubclassOf<UUserWidget> ItemIconClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
 	TSubclassOf<UUserWidget> HighlightWidgetClass;
-	
-	// The size of a single grid slot in pixels.
-	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
-	float SlotPixelSize = 80.f;
 
 private:
-	// A cached pointer to the inventory component for quick access.
-	UPROPERTY()
-	TObjectPtr<UInventoryComponent> InventoryComponent;
+	// Defines visual dimensions
+	int32 GridWidth = 0;
+	int32 GridHeight = 0;
+	float SlotPixelSize = 80.f;
 
-	// When a drag starts, we set this ID. RefreshInventory will skip drawing this item.
-	FGuid ItemIDToIgnoreOnRefresh;
+	// Defines backend context (Weak reference logic)
+	UPROPERTY()
+	TObjectPtr<UInventoryComponent> ContextInventory;
+
+	// Defines visual state
+	TArray<FPlacedItem> CachedItems;
+	FGuid ItemIDToIgnore;
+
+	//Store references to the created background slots
+	UPROPERTY()
+	TArray<TObjectPtr<USolaraqInventorySlotWidget>> SlotWidgets;
 };

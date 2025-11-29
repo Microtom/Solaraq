@@ -1,257 +1,174 @@
 // SolaraqInventoryGridWidget.cpp
-
-#include "UI/Inventory/SolaraqInventoryGridWidget.h" // Adjust path
+#include "UI/Inventory/SolaraqInventoryGridWidget.h"
+#include "UI/Inventory/SolaraqItemDragOperation.h"
 #include "UI/Inventory/SolaraqInventorySlotWidget.h"
-//#include "UI/Inventory/SolaraqItemIconWidget.h" // The simple icon widget
+#include "UI/Inventory/SolaraqItemIconWidget.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
-#include "Pawns/SolaraqCharacterPawn.h" // To get the inventory component
 #include "Items/ItemDataAssetBase.h"
-#include "UI/Inventory/SolaraqItemDragOperation.h"
-#include "UI/Inventory/SolaraqItemIconWidget.h"
 
-void USolaraqInventoryGridWidget::NativeConstruct()
+void USolaraqInventoryGridWidget::ConfigureGrid(int32 InWidth, int32 InHeight, float InSlotSize)
 {
-	Super::NativeConstruct();
-	UE_LOG(LogTemp, Log, TEXT("--- WBP_InventoryGrid::NativeConstruct ---"));
-
-	// Get and cache the inventory component.
-	if (APawn* OwningPawn = GetOwningPlayerPawn())
-	{
-		InventoryComponent = OwningPawn->FindComponentByClass<UInventoryComponent>();
-		if(InventoryComponent)
-		{
-			UE_LOG(LogTemp, Log, TEXT("  > Found InventoryComponent on Pawn '%s'."), *OwningPawn->GetName());
-		}
-	}
-
-	if (!InventoryComponent)
-	{
-		UE_LOG(LogTemp, Error, TEXT("  > CRITICAL: FAILED to find InventoryComponent on owning pawn!"));
-		return;
-	}
-
-	// Bind our RefreshInventory function to the inventory's update delegate.
-	InventoryComponent->OnInventoryUpdated.AddDynamic(this, &USolaraqInventoryGridWidget::RefreshInventory);
-	UE_LOG(LogTemp, Log, TEXT("  > Bound RefreshInventory to OnInventoryUpdated delegate."));
+	GridWidth = InWidth;
+	GridHeight = InHeight;
+	SlotPixelSize = InSlotSize;
     
-	// Perform an initial refresh to draw the inventory for the first time.
-	UE_LOG(LogTemp, Log, TEXT("  > Performing initial inventory refresh."));
-	RefreshInventory();
-}
+	SlotWidgets.Empty(); // Clear existing cache
 
-bool USolaraqInventoryGridWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
-{
-    Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
-
-	// Make sure we clear the ignored item ID regardless of success or failure.
-	ClearIgnoredItem();
-	
-    // Cast the operation to our specific item drag operation class.
-    USolaraqItemDragOperation* ItemDragOperation = Cast<USolaraqItemDragOperation>(InOperation);
-    if (!ItemDragOperation || !InventoryComponent)
-    {
-        // If the cast fails or we don't have an inventory, we can't handle this drop.
-        return false;
-    }
-
-    // --- Convert Mouse Position to Grid Coordinates ---
-    // 1. Get the position of the drop in the local space of the grid widget.
-    const FVector2D LocalDropPosition = InGeometry.AbsoluteToLocal(InDragDropEvent.GetScreenSpacePosition());
-
-    // 2. Account for the offset where the user initially clicked on the item.
-    // This gives us the desired top-left position of the item icon.
-    const FVector2D ItemTopLeftPosition = LocalDropPosition - ItemDragOperation->DragOffset;
-
-    // 3. Convert the pixel position to a grid cell coordinate.
-    // FMath::RoundToInt provides a nice 'snap' to the nearest cell, which handles
-    // the drop tolerance you wanted (up to half a slot size, which is 40 pixels).
-    const int32 TargetX = FMath::RoundToInt(ItemTopLeftPosition.X / SlotPixelSize);
-    const int32 TargetY = FMath::RoundToInt(ItemTopLeftPosition.Y / SlotPixelSize);
-    const FIntPoint TargetTopLeft(TargetX, TargetY);
-
-    UE_LOG(LogTemp, Log, TEXT("Drop detected. Target Grid Coords: %s"), *TargetTopLeft.ToString());
-
-    // --- Attempt to Move the Item in the Backend ---
-    const bool bMoveSuccessful = InventoryComponent->MoveItem(ItemDragOperation->ItemInfo.ItemID, TargetTopLeft);
-
-    if (bMoveSuccessful)
-    {
-        // The inventory component will have already broadcast the OnInventoryUpdated delegate.
-        // This will trigger RefreshInventory() and redraw the item in its new location.
-        UE_LOG(LogTemp, Log, TEXT("Item move successful."));
-        return true; // We successfully handled the drop.
-    }
-    else
-    {
-        // The move failed (e.g., space was occupied or out of bounds).
-        // The DragCancelled logic will take over automatically because we are returning false.
-        // It will restore visibility on the original widget.
-        UE_LOG(LogTemp, Warning, TEXT("Item move failed. Drag will be cancelled."));
-        return false; // We did not handle the drop.
-    }
-}
-
-void USolaraqInventoryGridWidget::RefreshInventory()
-{
-	UE_LOG(LogTemp, Log, TEXT("--- WBP_InventoryGrid::RefreshInventory CALLED ---"));
-
-	if (!InventoryComponent)
+	if (SlotCanvas && InventorySlotClass)
 	{
-        UE_LOG(LogTemp, Error, TEXT("  > ABORTING REFRESH: InventoryComponent is NULL."));
-		return;
-	}
-    if (!InventorySlotClass)
-	{
-        UE_LOG(LogTemp, Error, TEXT("  > ABORTING REFRESH: 'InventorySlotClass' is not set in the WBP_InventoryGrid Blueprint defaults!"));
-		return;
-	}
-    if (!ItemIconClass)
-	{
-        UE_LOG(LogTemp, Error, TEXT("  > ABORTING REFRESH: 'ItemIconClass' is not set in the WBP_InventoryGrid Blueprint defaults!"));
-		return;
-	}
-    if (!SlotCanvas)
-	{
-        UE_LOG(LogTemp, Error, TEXT("  > ABORTING REFRESH: 'SlotCanvas' is NULL. Make sure a CanvasPanel with this name exists in WBP_InventoryGrid."));
-		return;
-	}
-    if (!ItemIconCanvas)
-	{
-        UE_LOG(LogTemp, Error, TEXT("  > ABORTING REFRESH: 'ItemIconCanvas' is NULL. Make sure a CanvasPanel with this name exists in WBP_InventoryGrid."));
-		return;
-	}
-    
-    UE_LOG(LogTemp, Log, TEXT("  > All initial checks passed. Clearing old widgets."));
-	SlotCanvas->ClearChildren();
-	HighlightCanvas->ClearChildren();
-	ItemIconCanvas->ClearChildren();
-
-	// --- 1. Build a Local Grid State for fast lookups ---
-	const int32 GridWidth = InventoryComponent->GetGridWidth();
-	const int32 GridHeight = InventoryComponent->GetGridHeight();
-	const TArray<FPlacedItem>& PlacedItems = InventoryComponent->GetPlacedItems();
-	
-    UE_LOG(LogTemp, Log, TEXT("  > Grid Dimensions: %d x %d. Received %d items from InventoryComponent."), GridWidth, GridHeight, PlacedItems.Num());
-
-	TMap<FIntPoint, FGuid> LocalGridState;
-	for (const FPlacedItem& Item : PlacedItems)
-	{
-		// If this is the item being dragged, skip it for the background calculation.
-		if (ItemIDToIgnoreOnRefresh.IsValid() && Item.ItemID == ItemIDToIgnoreOnRefresh)
+		SlotCanvas->ClearChildren();
+		for (int32 Y = 0; Y < GridHeight; ++Y)
 		{
-			continue;
-		}
-		
-		if (Item.ItemData)
-		{
-			for (int32 y = 0; y < Item.ItemData->Dimensions.Y; ++y)
+			for (int32 X = 0; X < GridWidth; ++X)
 			{
-				for (int32 x = 0; x < Item.ItemData->Dimensions.X; ++x)
+				USolaraqInventorySlotWidget* SlotWidget = CreateWidget<USolaraqInventorySlotWidget>(this, InventorySlotClass);
+				if (SlotWidget)
 				{
-					LocalGridState.Add(Item.TopLeft + FIntPoint(x, y), Item.ItemID);
+					// Default to empty box (all borders true)
+					SlotWidget->ConfigureSlotAppearance(true, true, true, true);
+                    
+					UCanvasPanelSlot* CanvasSlot = SlotCanvas->AddChildToCanvas(SlotWidget);
+					CanvasSlot->SetPosition(FVector2D(X * SlotPixelSize, Y * SlotPixelSize));
+					CanvasSlot->SetSize(FVector2D(SlotPixelSize, SlotPixelSize));
+                    
+					// Cache it for Redraw updates
+					SlotWidgets.Add(SlotWidget);
 				}
 			}
 		}
 	}
-	
-	// --- 2. Procedurally Generate and Configure Background Slots ---
-    UE_LOG(LogTemp, Log, TEXT("  > Generating %d background slots..."), GridWidth * GridHeight);
-	for (int32 Y = 0; Y < GridHeight; ++Y)
-	{
-		for (int32 X = 0; X < GridWidth; ++X)
-		{
-			const FIntPoint CurrentCoord(X, Y);
-			const FGuid* OccupyingItemID = LocalGridState.Find(CurrentCoord);
-			
-			bool bIsTopEdge = false, bIsRightEdge = false, bIsBottomEdge = false, bIsLeftEdge = false;
+}
 
-			if (OccupyingItemID)
-			{
-				const FGuid* AboveItemID = LocalGridState.Find(CurrentCoord + FIntPoint(0, -1));
-				const FGuid* RightItemID = LocalGridState.Find(CurrentCoord + FIntPoint(1, 0));
-				const FGuid* BelowItemID = LocalGridState.Find(CurrentCoord + FIntPoint(0, 1));
-				const FGuid* LeftItemID  = LocalGridState.Find(CurrentCoord + FIntPoint(-1, 0));
+void USolaraqInventoryGridWidget::SetContextInventory(UInventoryComponent* InInventory)
+{
+	ContextInventory = InInventory;
+}
 
-				bIsTopEdge    = !AboveItemID || *OccupyingItemID != *AboveItemID;
-				bIsRightEdge  = !RightItemID || *OccupyingItemID != *RightItemID;
-				bIsBottomEdge = !BelowItemID || *OccupyingItemID != *BelowItemID;
-				bIsLeftEdge   = !LeftItemID  || *OccupyingItemID != *LeftItemID;
-			}
-			else
-			{
-				bIsTopEdge = bIsRightEdge = bIsBottomEdge = bIsLeftEdge = true;
-			}
-			
-			USolaraqInventorySlotWidget* SlotWidget = CreateWidget<USolaraqInventorySlotWidget>(this, InventorySlotClass);
-			if (SlotWidget)
-			{
-				SlotWidget->ConfigureSlotAppearance(bIsTopEdge, bIsRightEdge, bIsBottomEdge, bIsLeftEdge);
-				UCanvasPanelSlot* CanvasSlot = SlotCanvas->AddChildToCanvas(SlotWidget);
-				CanvasSlot->SetPosition(FVector2D(X * SlotPixelSize, Y * SlotPixelSize));
-				CanvasSlot->SetSize(FVector2D(SlotPixelSize, SlotPixelSize));
-			}
-		}
-	}
-    UE_LOG(LogTemp, Log, TEXT("  > Finished generating background slots."));
+void USolaraqInventoryGridWidget::UpdateState(const TArray<FPlacedItem>& InItems)
+{
+	CachedItems = InItems;
+	Redraw();
+}
 
-	// --- 3. Place Item Icons on Top ---
-    UE_LOG(LogTemp, Log, TEXT("  > Starting to place item icons..."));
-	for (const FPlacedItem& Item : PlacedItems)
-	{
-		// Also skip creating an icon for the item being dragged.
-		if (ItemIDToIgnoreOnRefresh.IsValid() && Item.ItemID == ItemIDToIgnoreOnRefresh)
-		{
-			continue;
-		}
-		
-        // Log info for the current item being processed
-        FString ItemName = Item.ItemData ? Item.ItemData->DisplayName.ToString() : TEXT("INVALID_ITEM_DATA");
-        UE_LOG(LogTemp, Log, TEXT("    -> Processing item: '%s' (Qty: %d)"), *ItemName, Item.Quantity);
+void USolaraqInventoryGridWidget::Redraw()
+{
+    // --- PART 1: Calculate Grid State for Backgrounds ---
+    
+    // Create a temporary map representing the grid: Coord -> ItemID
+    TMap<FIntPoint, FGuid> OccupiedSlots;
 
-		if(Item.ItemData)
-		{
-			USolaraqItemIconWidget* IconWidget = CreateWidget<USolaraqItemIconWidget>(this, ItemIconClass);
-			if (IconWidget)
-			{
-                UE_LOG(LogTemp, Log, TEXT("      - Successfully created WBP_ItemIcon widget."));
-				IconWidget->Initialize(Item, this); 
-                UE_LOG(LogTemp, Log, TEXT("      - Initialized widget with item data."));
+    for (const FPlacedItem& Item : CachedItems)
+    {
+        // Ghosting: Treat ignored item as if it doesn't exist
+        if (ItemIDToIgnore.IsValid() && Item.ItemID == ItemIDToIgnore) continue;
+        if (!Item.ItemData) continue;
 
-				UCanvasPanelSlot* CanvasSlot = ItemIconCanvas->AddChildToCanvas(IconWidget);
-                UE_LOG(LogTemp, Log, TEXT("      - Added widget to ItemIconCanvas."));
-				
-                FVector2D ItemPosition = FVector2D(Item.TopLeft.X * SlotPixelSize, Item.TopLeft.Y * SlotPixelSize);
-				FVector2D ItemSize = FVector2D(Item.ItemData->Dimensions.X * SlotPixelSize, Item.ItemData->Dimensions.Y * SlotPixelSize);
-                
-                CanvasSlot->SetPosition(ItemPosition);
-				CanvasSlot->SetSize(ItemSize);
-                UE_LOG(LogTemp, Log, TEXT("      - Set position to %s and size to %s."), *ItemPosition.ToString(), *ItemSize.ToString());
-
-				CanvasSlot->SetZOrder(1); 
-				
-			}
-            else
-            {
-                // THIS IS THE MOST LIKELY POINT OF FAILURE
-                UE_LOG(LogTemp, Error, TEXT("      - FAILED to create Item Icon Widget! 'ItemIconClass' is likely not set correctly in the WBP_InventoryGrid Blueprint!"));
-            }
-		}
-        else
+        // Mark all cells occupied by this item
+        for (int32 Y = 0; Y < Item.ItemData->Dimensions.Y; ++Y)
         {
-            UE_LOG(LogTemp, Warning, TEXT("    -> SKIPPING item because its ItemData is NULL."));
+            for (int32 X = 0; X < Item.ItemData->Dimensions.X; ++X)
+            {
+                OccupiedSlots.Add(Item.TopLeft + FIntPoint(X, Y), Item.ItemID);
+            }
         }
-	}
-    UE_LOG(LogTemp, Log, TEXT("  > Finished placing item icons."));
-    UE_LOG(LogTemp, Log, TEXT("--- WBP_InventoryGrid::RefreshInventory COMPLETE ---"));
+    }
+
+    // Update the appearance of every background slot
+    // SlotWidgets is a flat array, ordered Row by Row (Y then X)
+    for (int32 i = 0; i < SlotWidgets.Num(); ++i)
+    {
+        USolaraqInventorySlotWidget* SlotWidget = SlotWidgets[i];
+        if (!SlotWidget) continue;
+
+        int32 X = i % GridWidth;
+        int32 Y = i / GridWidth;
+        FIntPoint Current(X, Y);
+
+        bool bIsOccupied = OccupiedSlots.Contains(Current);
+        FGuid CurrentID = bIsOccupied ? OccupiedSlots[Current] : FGuid(); // Empty GUID if not occupied
+
+        // Helper to check neighbors
+        // A border exists if:
+        // 1. We are empty (always borders), OR
+        // 2. We are occupied, and the neighbor is EITHER empty OR has a DIFFERENT Item ID.
+        auto NeedsBorder = [&](FIntPoint NeighborCoord) -> bool
+        {
+            if (!bIsOccupied) return true; // Empty slots always have borders
+
+            // Check boundaries
+            if (NeighborCoord.X < 0 || NeighborCoord.Y < 0 || NeighborCoord.X >= GridWidth || NeighborCoord.Y >= GridHeight)
+                return true; // Edge of grid is always a border
+
+            if (!OccupiedSlots.Contains(NeighborCoord)) return true; // Neighbor is empty
+
+            FGuid NeighborID = OccupiedSlots[NeighborCoord];
+            return NeighborID != CurrentID; // True if IDs don't match (draw border separation)
+        };
+
+        bool bTop    = NeedsBorder(Current + FIntPoint(0, -1));
+        bool bRight  = NeedsBorder(Current + FIntPoint(1, 0));
+        bool bBottom = NeedsBorder(Current + FIntPoint(0, 1));
+        bool bLeft   = NeedsBorder(Current + FIntPoint(-1, 0));
+
+        SlotWidget->ConfigureSlotAppearance(bTop, bRight, bBottom, bLeft);
+    }
+
+
+    // --- PART 2: Draw Item Icons ---
+
+    if (!ItemIconCanvas || !ItemIconClass) return;
+    ItemIconCanvas->ClearChildren();
+
+    for (const FPlacedItem& Item : CachedItems)
+    {
+        if (ItemIDToIgnore.IsValid() && Item.ItemID == ItemIDToIgnore) continue;
+
+        if (Item.ItemData)
+        {
+            USolaraqItemIconWidget* IconWidget = CreateWidget<USolaraqItemIconWidget>(this, ItemIconClass);
+            if (IconWidget)
+            {
+                IconWidget->Initialize(Item, this);
+                UCanvasPanelSlot* CanvasSlot = ItemIconCanvas->AddChildToCanvas(IconWidget);
+                
+                FVector2D Pos(Item.TopLeft.X * SlotPixelSize, Item.TopLeft.Y * SlotPixelSize);
+                FVector2D Size(Item.ItemData->Dimensions.X * SlotPixelSize, Item.ItemData->Dimensions.Y * SlotPixelSize);
+
+                CanvasSlot->SetPosition(Pos);
+                CanvasSlot->SetSize(Size);
+            }
+        }
+    }
+}
+
+bool USolaraqInventoryGridWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
+{
+	Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
+	
+	ClearIgnoredItem();
+	Redraw(); // Re-calculates borders immediately so the ghosted item reappears
+
+	USolaraqItemDragOperation* DragOp = Cast<USolaraqItemDragOperation>(InOperation);
+	if (!DragOp) return false;
+
+	const FVector2D LocalDropPos = InGeometry.AbsoluteToLocal(InDragDropEvent.GetScreenSpacePosition());
+	const FVector2D IconTopLeft = LocalDropPos - DragOp->DragOffset;
+	
+	const int32 X = FMath::RoundToInt(IconTopLeft.X / SlotPixelSize);
+	const int32 Y = FMath::RoundToInt(IconTopLeft.Y / SlotPixelSize);
+	
+	OnItemDrop.Broadcast(DragOp->ItemInfo, DragOp->SourceGrid, this, FIntPoint(X, Y));
+
+	return true;
 }
 
 void USolaraqInventoryGridWidget::SetItemToIgnore(const FGuid& ItemID)
 {
-	ItemIDToIgnoreOnRefresh = ItemID;
+	ItemIDToIgnore = ItemID;
 }
 
 void USolaraqInventoryGridWidget::ClearIgnoredItem()
 {
-	ItemIDToIgnoreOnRefresh.Invalidate();
+	ItemIDToIgnore.Invalidate();
 }

@@ -1,79 +1,84 @@
-// SolaraqHUDWidget.cpp
 
+// SolaraqHUDWidget.cpp
 #include "UI/SolaraqHUDWidget.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "UI/SolaraqWidgetDragOperation.h"
 #include "Logging/SolaraqLogChannels.h"
-#include "UI/Inventory/SolaraqItemDragOperation.h" // <-- ADD THIS
-#include "Pawns/SolaraqCharacterPawn.h"            // <-- ADD THIS
-#include "Items/InventoryComponent.h"             // <-- ADD THIS
+#include "UI/Inventory/SolaraqItemDragOperation.h"
+#include "Pawns/SolaraqCharacterPawn.h"
+#include "Items/InventoryComponent.h"
 #include "UI/Inventory/SolaraqInventoryGridWidget.h"
-
 UCanvasPanel* USolaraqHUDWidget::GetMainCanvas()
 {
-	return MainCanvas;
+return MainCanvas;
 }
-
 bool USolaraqHUDWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
 {
-	Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
+Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
 
-	UE_LOG(LogTemp, Log, TEXT("--- HUD::NativeOnDrop CALLED --- If you see this, the HUD is correctly hit-testable."));
+// --- 1. Check if a UI WIDGET is being dropped for repositioning ---
+if (USolaraqWidgetDragOperation* WidgetDragOp = Cast<USolaraqWidgetDragOperation>(InOperation))
+{		
+	if (!WidgetDragOp->WidgetReference) return false;
 	
-	// --- 1. Check if a UI WIDGET is being dropped for repositioning ---
-	if (USolaraqWidgetDragOperation* WidgetDragOp = Cast<USolaraqWidgetDragOperation>(InOperation))
-	{		
-		if (!WidgetDragOp->WidgetReference)
-		{
-			return false;
-		}
-		
-		const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InDragDropEvent.GetScreenSpacePosition());
-		const FVector2D FinalPosition = LocalPosition - WidgetDragOp->DragOffset;
+	FVector2D MouseAbsPos = InDragDropEvent.GetScreenSpacePosition();
+	FVector2D NewWidgetAbsPos = MouseAbsPos - WidgetDragOp->DragOffset;
+	FVector2D FinalLocalPos = InGeometry.AbsoluteToLocal(NewWidgetAbsPos);
 
-		if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(WidgetDragOp->WidgetReference->Slot))
-		{
-			CanvasSlot->SetPosition(FinalPosition);
-			WidgetDragOp->WidgetReference->SetVisibility(ESlateVisibility::Visible);
-			return true;
-		}
-		return false;
-	}
-
-	// --- 2. If not a UI widget, check if an INVENTORY ITEM is being dropped ---
-	if (USolaraqItemDragOperation* ItemDragOp = Cast<USolaraqItemDragOperation>(InOperation))
+	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(WidgetDragOp->WidgetReference->Slot))
 	{
-		if (!ItemDragOp->ItemInfo.IsValid() || !ItemDragOp->SourceGrid)
-		{
-			return false;
-		}
-		
-		UInventoryComponent* SourceInventory = ItemDragOp->SourceGrid->GetInventoryComponent();
-		if (!SourceInventory)
-		{
-			return false;
-		}
-		
-		const FPlacedItem ItemToDrop = ItemDragOp->ItemInfo;
+		// --- DEBUG LOGGING ---
+		UE_LOG(LogTemp, Warning, TEXT("HUD DROP | MouseAbs: %s | Offset: %s | TargetAbs: %s | FinalLocal: %s"), 
+			*MouseAbsPos.ToString(), 
+			*WidgetDragOp->DragOffset.ToString(), 
+			*NewWidgetAbsPos.ToString(), 
+			*FinalLocalPos.ToString());
 
-		// Remove the full stack from the source inventory. This will trigger the OnInventoryUpdated delegate.
-		SourceInventory->RemoveItem(ItemToDrop.ItemID, ItemToDrop.Quantity);
+		UE_LOG(LogTemp, Warning, TEXT("HUD DROP | Old Anchors: Min %s Max %s | Old Alignment: %s"), 
+			*CanvasSlot->GetAnchors().Minimum.ToString(),
+			*CanvasSlot->GetAnchors().Maximum.ToString(),
+			*CanvasSlot->GetAlignment().ToString());
+		// ---------------------
 
-		// Get the player character to handle spawning the item in the world.
-		if (ASolaraqCharacterPawn* PlayerPawn = Cast<ASolaraqCharacterPawn>(GetOwningPlayerPawn()))
-		{
-			PlayerPawn->DropItem(ItemToDrop.ItemData, ItemToDrop.Quantity);
-			UE_LOG(LogTemp, Log, TEXT("  > Instructed PlayerPawn to drop item."));
-			return true;
-		}
+		// --- FIX: FORCE ANCHORS TO TOP-LEFT ---
+		// If Anchors are centered (0.5,0.5), SetPosition acts as an offset from the center of the screen.
+		// By forcing them to (0,0), SetPosition acts as absolute pixel coordinates from top-left.
+		FAnchors TopLeftAnchors(0.f, 0.f, 0.f, 0.f);
+		CanvasSlot->SetAnchors(TopLeftAnchors);
+		CanvasSlot->SetAlignment(FVector2D(0.f, 0.f)); // Ensure pivot is top-left
 		
-		UE_LOG(LogTemp, Error, TEXT("  > Drop failed: OwningPlayerPawn could not be cast to ASolaraqCharacterPawn."));
-		// NOTE: If the drop fails after removing the item, it will be lost. For a networked game,
-		// you would need a more robust transaction system (e.g., only remove the item after the server confirms the drop).
-		return false;
+		CanvasSlot->SetPosition(FinalLocalPos);
+		
+		// If the window size gets messed up by changing anchors (happens if it was stretched), reset size here if needed:
+		// CanvasSlot->SetSize(DesiredSize); 
+
+		WidgetDragOp->WidgetReference->SetVisibility(ESlateVisibility::Visible);
+		return true;
 	}
-
-	UE_LOG(LogTemp, Log, TEXT("  > Unhandled drop operation type."));
 	return false;
+}
+
+// --- 2. If not a UI widget, check if an INVENTORY ITEM is being dropped ---
+if (USolaraqItemDragOperation* ItemDragOp = Cast<USolaraqItemDragOperation>(InOperation))
+{
+	if (!ItemDragOp->ItemInfo.IsValid() || !ItemDragOp->SourceGrid) return false;
+	
+	UInventoryComponent* SourceInventory = ItemDragOp->SourceGrid->GetContextInventory();
+	if (!SourceInventory) return false;
+	
+	const FPlacedItem ItemToDrop = ItemDragOp->ItemInfo;
+
+	SourceInventory->RemoveItem(ItemToDrop.ItemID, ItemToDrop.Quantity);
+
+	if (ASolaraqCharacterPawn* PlayerPawn = Cast<ASolaraqCharacterPawn>(GetOwningPlayerPawn()))
+	{
+		PlayerPawn->DropItem(ItemToDrop.ItemData, ItemToDrop.Quantity);
+		return true;
+	}
+	
+	return false;
+}
+
+return false;
 }

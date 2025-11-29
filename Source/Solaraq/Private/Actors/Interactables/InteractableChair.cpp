@@ -1,8 +1,8 @@
-#include "Actors/Interactables/InteractableChair.h" // Adjust this path if your folder structure is different
+#include "Actors/Interactables/InteractableChair.h"
 #include "Pawns/SolaraqCharacterPawn.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
+#include "Controllers/SolaraqCharacterPlayerController.h"
 
 AInteractableChair::AInteractableChair()
 {
@@ -16,56 +16,57 @@ AInteractableChair::AInteractableChair()
 
     SeatAttachmentPoint = CreateDefaultSubobject<USceneComponent>(TEXT("SeatAttachmentPoint"));
     SeatAttachmentPoint->SetupAttachment(ChairMesh);
+    // Move seat up slightly so they aren't inside the mesh
+    SeatAttachmentPoint->SetRelativeLocation(FVector(0.f, 0.f, 50.f)); 
+
+    EntryPoint = CreateDefaultSubobject<USceneComponent>(TEXT("EntryPoint"));
+    EntryPoint->SetupAttachment(RootComponent);
+    // Default entry point 100 units in front of the chair
+    EntryPoint->SetRelativeLocation(FVector(100.f, 0.f, 0.f)); 
     
     SeatedPawn = nullptr;
 }
 
+FVector AInteractableChair::GetEntryPointLocation() const
+{
+    return EntryPoint->GetComponentLocation();
+}
+
 void AInteractableChair::Interact_Implementation(APawn* InteractingPawn)
 {
-    ASolaraqCharacterPawn* Character = Cast<ASolaraqCharacterPawn>(InteractingPawn);
-    if (!Character)
+    // If someone is already sitting here, and it's NOT the person trying to interact, ignore.
+    if (SeatedPawn && SeatedPawn != InteractingPawn)
     {
-        return; // Not the right kind of pawn
+        return;
     }
 
-    // --- Logic for GETTING OUT of the chair ---
-    if (SeatedPawn == Character)
+    // If the person interacting is ALREADY the one sitting, they want to stand up.
+    if (SeatedPawn == InteractingPawn)
     {
-        // The logic assumes the Character class has EndInteraction/BeginInteraction.
-        // If these don't exist yet, comment them out to compile.
-        // Character->EndInteraction(); 
-        
-        Character->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
-        
-        // Give them a little space so they don't get stuck inside the chair mesh
-        const FVector ExitLocation = Character->GetActorForwardVector() * 100.f;
-        Character->AddActorWorldOffset(ExitLocation, false, nullptr, ETeleportType::TeleportPhysics);
-
-        // Re-enable collision or movement here if you disabled it during sitting
-        if (Character->GetCharacterMovement())
+        ASolaraqCharacterPawn* SolaraqChar = Cast<ASolaraqCharacterPawn>(InteractingPawn);
+        if (SolaraqChar)
         {
-            Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+            SolaraqChar->StandUp();
+            SeatedPawn = nullptr;
         }
-
-        SeatedPawn = nullptr;
+        return;
     }
-    // --- Logic for SITTING IN the chair ---
-    else if (SeatedPawn == nullptr)
+
+    // --- LOGIC START: Move to Chair ---
+    // Instead of sitting immediately, we tell the Controller to move us there first.
+    if (ASolaraqCharacterPlayerController* PC = Cast<ASolaraqCharacterPlayerController>(InteractingPawn->GetController()))
     {
-        SeatedPawn = Character;
-        // Character->BeginInteraction(this); 
-
-        // Attach the pawn to our seat socket.
-        Character->AttachToComponent(SeatAttachmentPoint, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-        
-        // Zero out location/rotation relative to the seat point
-        Character->SetActorRelativeLocation(FVector::ZeroVector);
-        Character->SetActorRelativeRotation(FRotator::ZeroRotator);
-
-        // Disable movement while seated so they don't walk away with the chair attached
-        if (Character->GetCharacterMovement())
-        {
-            Character->GetCharacterMovement()->DisableMovement();
-        }
+        // This triggers the "Auto-Pilot" in the controller
+        PC->MoveToAndInteract(this);
     }
+}
+
+void AInteractableChair::Sit(ASolaraqCharacterPawn* PawnToSit)
+{
+    if (!PawnToSit || SeatedPawn != nullptr) return;
+
+    SeatedPawn = PawnToSit;
+    
+    // Call the Pawn's sitting logic
+    PawnToSit->SitDown(SeatAttachmentPoint);
 }

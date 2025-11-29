@@ -17,6 +17,8 @@
 #include "Logging/SolaraqLogChannels.h"
 #include "Systems/FishingSubsystem.h"
 #include "UI/SolaraqHUDWidget.h"
+#include "Items/SolaraqEquipmentComponent.h"
+#include "UI/Inventory/SolaraqEquipmentWindowWidget.h"
 #include "UI/Inventory/SolaraqInventoryWindowWidget.h"
 #include "UI/Inventory/SolaraqInventoryGridWidget.h"
 
@@ -61,6 +63,16 @@ void ASolaraqCharacterPlayerController::HideFishingHUD()
         // We can let it be garbage collected or null it out if we want to be explicit
         // For this simple case, just removing it is fine. It will be re-used next time.
     }
+}
+
+void ASolaraqCharacterPlayerController::MoveToAndInteract(AInteractableChair* TargetChair)
+{
+    if (!TargetChair) return;
+
+    PendingInteractionChair = TargetChair;
+    
+    // Start moving immediately
+    UAIBlueprintHelperLibrary::SimpleMoveToLocation(this, PendingInteractionChair->GetEntryPointLocation());
 }
 
 void ASolaraqCharacterPlayerController::ApplyCharacterInputMappingContext()
@@ -273,6 +285,11 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
     {
         UE_LOG(LogSolaraqSystem, Warning, TEXT("CharacterPC: ToggleInventoryAction is NOT assigned! Inventory will not open."));
     }
+
+    if (ToggleEquipmentWindowAction)
+    {
+        EnhancedInputComponentRef->BindAction(ToggleEquipmentWindowAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleToggleEquipmentWindow);
+    }
 }
 
 void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
@@ -399,10 +416,44 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
             bWasInFishingMode_LastFrame = bIsInFishingMode_ThisFrame;
         }
     }
+
+    if (PendingInteractionChair && GetControlledCharacter())
+    {
+        FVector CurrentLoc = GetControlledCharacter()->GetActorLocation();
+        FVector TargetLoc = PendingInteractionChair->GetEntryPointLocation();
+        
+        // Ignore Z difference for distance check
+        CurrentLoc.Z = TargetLoc.Z;
+
+        float Distance = FVector::Dist(CurrentLoc, TargetLoc);
+
+        if (Distance <= InteractionAcceptanceRadius)
+        {
+            // We have arrived! Stop moving.
+            StopMovement();
+            
+            // Execute the Sit
+            PendingInteractionChair->Sit(GetControlledCharacter());
+            
+            // Clear the pending pointer so we don't try to sit again every frame
+            PendingInteractionChair = nullptr;
+        }
+        else
+        {
+            // Keep moving to the target (ensures we don't stop if path recalculates)
+            // Note: In a real AI setup, you'd use MoveToActor, but SimpleMove works for click-to-move
+            UAIBlueprintHelperLibrary::SimpleMoveToLocation(this, TargetLoc);
+        }
+    }
 }
 
 void ASolaraqCharacterPlayerController::HandleCharacterMoveInput(const FInputActionValue& Value)
 {
+    if (PendingInteractionChair)
+    {
+        PendingInteractionChair = nullptr;
+    }
+    
     if (UFishingSubsystem* FishingSubsystem = GetWorld()->GetSubsystem<UFishingSubsystem>())
     {
         if (FishingSubsystem->GetCurrentState() != EFishingState::Idle)
@@ -420,6 +471,7 @@ void ASolaraqCharacterPlayerController::HandleCharacterMoveInput(const FInputAct
         const FVector2D MovementVector = Value.Get<FVector2D>();
         CharPawn->HandleMoveInput(MovementVector);
     }
+    
 }
 
 void ASolaraqCharacterPlayerController::HandlePointerMove(const FInputActionValue& Value)
@@ -488,25 +540,25 @@ void ASolaraqCharacterPlayerController::HandlePrimaryUseStarted()
 
     if (CharPawn)
     {
+        // ... (Velocity check logic remains the same) ...
         if (CharPawn->GetVelocity().SizeSquared() > 1.0f)
         {
             if (UFishingSubsystem* FishingSS = GetWorld()->GetSubsystem<UFishingSubsystem>())
             {
                 const EFishingState CurrentFishingState = FishingSS->GetCurrentState();
-                // Allow reeling while moving slightly, but not starting a new cast.
                 if (CurrentFishingState == EFishingState::Idle || CurrentFishingState == EFishingState::ReadyToCast)
                 {
-                    UE_LOG(LogSolaraqFishing, Log, TEXT("PC: PrimaryUse blocked because pawn is moving."));
-                    return; // Abort!
+                    return; 
                 }
             }
         }
     
         UE_LOG(LogSolaraqFishing, Warning, TEXT("PC: HandlePrimaryUseStarted() - Input received."));
     
-        if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
+        // --- CHANGE UEquipmentComponent TO USolaraqEquipmentComponent ---
+        if (USolaraqEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
         {
-            EquipComp->HandlePrimaryUse(); // Pass the command to the pawn's component
+            EquipComp->HandlePrimaryUse(); 
         }
     }
     
@@ -517,9 +569,10 @@ void ASolaraqCharacterPlayerController::HandlePrimaryUseCompleted()
     UE_LOG(LogSolaraqFishing, Warning, TEXT("PC: HandlePrimaryUseCompleted() - Input received."));
     if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
     {
-        if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
+        // --- CHANGE UEquipmentComponent TO USolaraqEquipmentComponent ---
+        if (USolaraqEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
         {
-            EquipComp->HandlePrimaryUse_Stop(); // Pass the command to the pawn's component
+            EquipComp->HandlePrimaryUse_Stop(); 
         }
     }
 }
@@ -528,9 +581,10 @@ void ASolaraqCharacterPlayerController::HandleSecondaryUseStarted()
 {
     if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
     {
-        if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
+        // --- CHANGE UEquipmentComponent TO USolaraqEquipmentComponent ---
+        if (USolaraqEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
         {
-            EquipComp->HandleSecondaryUse(); // Pass the command to the pawn's component
+            EquipComp->HandleSecondaryUse(); 
         }
     }
 }
@@ -539,9 +593,10 @@ void ASolaraqCharacterPlayerController::HandleSecondaryUseCompleted()
 {
     if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
     {
-        if (UEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
+        // --- CHANGE UEquipmentComponent TO USolaraqEquipmentComponent ---
+        if (USolaraqEquipmentComponent* EquipComp = CharPawn->GetEquipmentComponent())
         {
-            EquipComp->HandleSecondaryUse_Stop(); // Pass the command to the pawn's component
+            EquipComp->HandleSecondaryUse_Stop(); 
         }
     }
 }
@@ -568,13 +623,9 @@ void ASolaraqCharacterPlayerController::HandleToggleFishingMode()
 
 void ASolaraqCharacterPlayerController::HandleCharacterToggleInventory()
 {
-    UE_LOG(LogSolaraqSystem, Log, TEXT("HandleCharacterToggleInventory CALLED."));
-	
     if (CharacterInventoryWidgetInstance)
     {
-        UE_LOG(LogSolaraqSystem, Log, TEXT("  > Hiding inventory."));
-        
-        // Save position before removing
+        // --- CLOSING ---
         if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(CharacterInventoryWidgetInstance->Slot))
         {
             LastInventoryPosition = CanvasSlot->GetPosition();
@@ -583,33 +634,32 @@ void ASolaraqCharacterPlayerController::HandleCharacterToggleInventory()
 
         CharacterInventoryWidgetInstance->RemoveFromParent();
         CharacterInventoryWidgetInstance = nullptr;
-
-        // We are already in GameAndUI mode, but we can re-assert it if needed.
-        // For now, we don't even need to change the input mode when closing.
-        // We can optionally hide the cursor if nothing else needs it, but for an MMO-style
-        // game, keeping it visible is often desired.
-        // SetShowMouseCursor(false); // Optional: if you want the cursor to hide.
     }
     else
     {
-        UE_LOG(LogSolaraqSystem, Log, TEXT("  > Showing inventory."));
-        
-        if (!CharacterInventoryWidgetClass) { /* ... error log ... */ return; }
-        if (!MainHUDWidgetInstance || !MainHUDWidgetInstance->GetMainCanvas()) { /* ... error log ... */ return; }
+        // --- OPENING ---
+        if (!CharacterInventoryWidgetClass || !MainHUDWidgetInstance) return;
 
         CharacterInventoryWidgetInstance = CreateWidget<USolaraqInventoryWindowWidget>(this, CharacterInventoryWidgetClass);
         if (CharacterInventoryWidgetInstance)
         {
+            // === FIX: BIND TO THE UI CLOSE EVENT ===
+            CharacterInventoryWidgetInstance->OnCloseRequested.AddDynamic(this, &ASolaraqCharacterPlayerController::OnInventoryClosedByUI);
+            // =======================================
+
             MainHUDWidgetInstance->GetMainCanvas()->AddChildToCanvas(CharacterInventoryWidgetInstance);
             
             if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(CharacterInventoryWidgetInstance->Slot))
             {
                 if (bIsInventoryPositionSet)
                 {
+                    CanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 0.f)); // Force Top-Left
+                    CanvasSlot->SetAlignment(FVector2D(0.f, 0.f));        // Pivot Top-Left
                     CanvasSlot->SetPosition(LastInventoryPosition);
                 }
                 else
                 {
+                    // Default Center
                     CanvasSlot->SetAnchors(FAnchors(0.5f));
                     CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
                     CanvasSlot->SetPosition(FVector2D(0, 0));
@@ -617,18 +667,61 @@ void ASolaraqCharacterPlayerController::HandleCharacterToggleInventory()
                 CanvasSlot->SetAutoSize(true);
             }
 
-            // --- THIS IS THE KEY CHANGE ---
-            // We set the input mode to GameAndUI. This allows both UI clicks and game input to be processed.
             FInputModeGameAndUI InputModeData;
-            
-            // We DO NOT set a widget to focus. This allows game input to continue unimpeded.
-            // InputModeData.SetWidgetToFocus(...) is removed.
-            
             InputModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
             InputModeData.SetHideCursorDuringCapture(false);
-            
             SetInputMode(InputModeData);
-            SetShowMouseCursor(true); // Ensure the cursor is visible for UI interaction.
+            SetShowMouseCursor(true); 
+        }
+    }
+}
+
+void ASolaraqCharacterPlayerController::HandleToggleEquipmentWindow()
+{
+    if (EquipmentWindowInstance)
+    {
+        // --- CLOSING ---
+        // Save Position before destroying
+        if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(EquipmentWindowInstance->Slot))
+        {
+            LastEquipmentPosition = CanvasSlot->GetPosition();
+            bIsEquipmentPositionSet = true;
+        }
+
+        EquipmentWindowInstance->RemoveFromParent();
+        EquipmentWindowInstance = nullptr;
+    }
+    else
+    {
+        // --- OPENING ---
+        if (!EquipmentWindowWidgetClass || !MainHUDWidgetInstance) return;
+
+        EquipmentWindowInstance = CreateWidget<USolaraqEquipmentWindowWidget>(this, EquipmentWindowWidgetClass);
+        if (EquipmentWindowInstance)
+        {
+            // Bind the Close Event
+            EquipmentWindowInstance->OnCloseRequested.AddDynamic(this, &ASolaraqCharacterPlayerController::OnEquipmentClosedByUI);
+
+            MainHUDWidgetInstance->GetMainCanvas()->AddChildToCanvas(EquipmentWindowInstance);
+            
+            // Restore Position
+            if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(EquipmentWindowInstance->Slot))
+            {
+                if (bIsEquipmentPositionSet)
+                {
+                    CanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 0.f)); // Force Top-Left
+                    CanvasSlot->SetAlignment(FVector2D(0.f, 0.f));        // Pivot Top-Left
+                    CanvasSlot->SetPosition(LastEquipmentPosition);
+                }
+                else
+                {
+                    // Default Offset from Center
+                    CanvasSlot->SetAnchors(FAnchors(0.5f));
+                    CanvasSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+                    CanvasSlot->SetPosition(FVector2D(-300, 0)); 
+                }
+                CanvasSlot->SetAutoSize(true);
+            }
         }
     }
 }
@@ -697,4 +790,14 @@ void ASolaraqCharacterPlayerController::HandleSprintCompleted(const FInputAction
     {
         UE_LOG(LogSolaraqMovement, Error, TEXT("  -> GetControlledCharacter() is NULL! Cannot stop sprinting."), *GetNameSafe(this));
     }
+}
+
+void ASolaraqCharacterPlayerController::OnInventoryClosedByUI()
+{
+    HandleCharacterToggleInventory();
+}
+
+void ASolaraqCharacterPlayerController::OnEquipmentClosedByUI()
+{
+    HandleToggleEquipmentWindow();
 }

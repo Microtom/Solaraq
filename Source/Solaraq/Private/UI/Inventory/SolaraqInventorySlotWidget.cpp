@@ -1,119 +1,69 @@
 // SolaraqInventorySlotWidget.cpp
-
-#include "UI/Inventory/SolaraqInventorySlotWidget.h" // Adjust path as needed
+#include "UI/Inventory/SolaraqInventorySlotWidget.h"
 #include "Components/Image.h"
 
 void USolaraqInventorySlotWidget::NativePreConstruct()
 {
-	Super::NativePreConstruct();
+    Super::NativePreConstruct();
+    
+    // Ensure the slot itself doesn't block drag-and-drop events meant for the Grid
+    SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 
-	// In the editor, this will make sure our configuration function runs
-	// so we can see a default state. We can just configure it as a default 1x1 empty slot.
-	if (IsDesignTime())
-	{
-		ConfigureSlotAppearance(true, true, true, true);
-	}
+    if (IsDesignTime())
+    {
+        ConfigureSlotAppearance(true, true, true, true);
+    }
 }
 
 void USolaraqInventorySlotWidget::ConfigureSlotAppearance(bool bIsTopEdge, bool bIsRightEdge, bool bIsBottomEdge, bool bIsLeftEdge)
 {
-	// Ensure the textures have been assigned in the Blueprint.
-	if (!CornerPieceTexture || !StraightPieceTexture)
-	{
-		return;
-	}
+    if (!CornerPieceTexture || !StraightPieceTexture || !FillPieceTexture) return;
 
-	// Determine if each corner is an "outer" corner of the item's shape.
-	const bool bIsTopLeftCorner = bIsTopEdge && bIsLeftEdge;
-	const bool bIsTopRightCorner = bIsTopEdge && bIsRightEdge;
-	const bool bIsBottomRightCorner = bIsBottomEdge && bIsRightEdge;
-	const bool bIsBottomLeftCorner = bIsBottomEdge && bIsLeftEdge;
+    auto ConfigureQuadrant = [&](UImage* Image, bool bVerticalBorder, bool bHorizontalBorder, float Angle)
+    {
+        Image->SetRenderTransformAngle(Angle);
+        Image->SetVisibility(ESlateVisibility::Visible);
 
-	// This logic can be simplified. We configure each of the four UImage components.
-	// Visibility is controlled by setting a null brush.
+        if (bVerticalBorder && bHorizontalBorder)
+        {
+            Image->SetBrushFromTexture(CornerPieceTexture);
+        }
+        else if (bVerticalBorder)
+        {
+            Image->SetBrushFromTexture(StraightPieceTexture);
+        }
+        else if (bHorizontalBorder)
+        {
+            // Assuming StraightTexture is Top-oriented
+            Image->SetBrushFromTexture(StraightPieceTexture); 
+        }
+        else
+        {
+            Image->SetBrushFromTexture(FillPieceTexture);
+        }
+    };
 
-	// --- Configure Top-Left Image ---
-	if (bIsTopLeftCorner)
-	{
-		Corner_TL->SetBrushFromTexture(CornerPieceTexture);
-		Corner_TL->SetRenderTransformAngle(0.f);
-	}
-	else if (bIsTopEdge)
-	{
-		Corner_TL->SetBrushFromTexture(StraightPieceTexture);
-		Corner_TL->SetRenderTransformAngle(0.f); // Assumes straight piece is a top border
-	}
-	else if (bIsLeftEdge)
-	{
-		Corner_TL->SetBrushFromTexture(StraightPieceTexture);
-		Corner_TL->SetRenderTransformAngle(-90.f);
-	}
-	else // This is an internal slot piece
-	{
-		Corner_TL->SetVisibility(ESlateVisibility::Collapsed);// Set to an empty brush to make it invisible
-	}
+    // --- Top Left ---
+    if (bIsTopEdge && bIsLeftEdge) { Corner_TL->SetBrushFromTexture(CornerPieceTexture); Corner_TL->SetRenderTransformAngle(0.f); }
+    else if (bIsTopEdge)           { Corner_TL->SetBrushFromTexture(StraightPieceTexture); Corner_TL->SetRenderTransformAngle(0.f); }
+    else if (bIsLeftEdge)          { Corner_TL->SetBrushFromTexture(StraightPieceTexture); Corner_TL->SetRenderTransformAngle(-90.f); }
+    else                           { Corner_TL->SetBrushFromTexture(FillPieceTexture);     Corner_TL->SetRenderTransformAngle(0.f); }
 
-	// --- Configure Top-Right Image ---
-	if (bIsTopRightCorner)
-	{
-		Corner_TR->SetBrushFromTexture(CornerPieceTexture);
-		Corner_TR->SetRenderTransformAngle(90.f);
+    // --- Top Right ---
+    if (bIsTopEdge && bIsRightEdge) { Corner_TR->SetBrushFromTexture(CornerPieceTexture); Corner_TR->SetRenderTransformAngle(90.f); }
+    else if (bIsTopEdge)            { Corner_TR->SetBrushFromTexture(StraightPieceTexture); Corner_TR->SetRenderTransformAngle(0.f); } 
+    else if (bIsRightEdge)          { Corner_TR->SetBrushFromTexture(StraightPieceTexture); Corner_TR->SetRenderTransformAngle(90.f); }
+    else                            { Corner_TR->SetBrushFromTexture(FillPieceTexture);     Corner_TR->SetRenderTransformAngle(0.f); }
 
-	}
-	else if (bIsTopEdge)
-	{
-		Corner_TR->SetBrushFromTexture(StraightPieceTexture);
-		Corner_TR->SetRenderTransformAngle(0.f);
-	}
-	else if (bIsRightEdge)
-	{
-		Corner_TR->SetBrushFromTexture(StraightPieceTexture);
-		Corner_TR->SetRenderTransformAngle(90.f);
-	}
-	else
-	{
-		Corner_TR->SetVisibility(ESlateVisibility::Collapsed);
-	}
-	
-	// --- Configure Bottom-Right Image ---
-	if (bIsBottomRightCorner)
-	{
-		Corner_BR->SetBrushFromTexture(CornerPieceTexture);
-		Corner_BR->SetRenderTransformAngle(180.f);
-	}
-	else if (bIsBottomEdge)
-	{
-		Corner_BR->SetBrushFromTexture(StraightPieceTexture);
-		Corner_BR->SetRenderTransformAngle(180.f);
-	}
-	else if (bIsRightEdge)
-	{
-		Corner_BR->SetBrushFromTexture(StraightPieceTexture);
-		Corner_BR->SetRenderTransformAngle(90.f);
-	}
-	else
-	{
-		Corner_BR->SetVisibility(ESlateVisibility::Collapsed);
-	}
+    // --- Bottom Right ---
+    if (bIsBottomEdge && bIsRightEdge) { Corner_BR->SetBrushFromTexture(CornerPieceTexture); Corner_BR->SetRenderTransformAngle(180.f); }
+    else if (bIsBottomEdge)            { Corner_BR->SetBrushFromTexture(StraightPieceTexture); Corner_BR->SetRenderTransformAngle(180.f); }
+    else if (bIsRightEdge)             { Corner_BR->SetBrushFromTexture(StraightPieceTexture); Corner_BR->SetRenderTransformAngle(90.f); }
+    else                               { Corner_BR->SetBrushFromTexture(FillPieceTexture);     Corner_BR->SetRenderTransformAngle(0.f); }
 
-	// --- Configure Bottom-Left Image ---
-	if (bIsBottomLeftCorner)
-	{
-		Corner_BL->SetBrushFromTexture(CornerPieceTexture);
-		Corner_BL->SetRenderTransformAngle(-90.f);
-	}
-	else if (bIsBottomEdge)
-	{
-		Corner_BL->SetBrushFromTexture(StraightPieceTexture);
-		Corner_BL->SetRenderTransformAngle(180.f);
-	}
-	else if (bIsLeftEdge)
-	{
-		Corner_BL->SetBrushFromTexture(StraightPieceTexture);
-		Corner_BL->SetRenderTransformAngle(-90.f);
-	}
-	else
-	{
-		Corner_BL->SetVisibility(ESlateVisibility::Collapsed);
-	}
+    // --- Bottom Left ---
+    if (bIsBottomEdge && bIsLeftEdge) { Corner_BL->SetBrushFromTexture(CornerPieceTexture); Corner_BL->SetRenderTransformAngle(270.f); }
+    else if (bIsBottomEdge)           { Corner_BL->SetBrushFromTexture(StraightPieceTexture); Corner_BL->SetRenderTransformAngle(180.f); }
+    else if (bIsLeftEdge)             { Corner_BL->SetBrushFromTexture(StraightPieceTexture); Corner_BL->SetRenderTransformAngle(270.f); }
+    else                              { Corner_BL->SetBrushFromTexture(FillPieceTexture);     Corner_BL->SetRenderTransformAngle(0.f); }
 }
