@@ -211,58 +211,53 @@ void ASolaraqCharacterPawn::SitDown(USceneComponent* SeatAnchor)
 {
     if (!SeatAnchor) return;
 
-    // 1. Disable Movement
+    // 1. Disable Control
     if (GetCharacterMovement())
     {
-        GetCharacterMovement()->DisableMovement();
         GetCharacterMovement()->StopMovementImmediately();
+        GetCharacterMovement()->DisableMovement();
     }
-
-    // 2. Disable Collision with the Chair so we don't glitch out
-    // (Assuming the SeatAnchor's owner is the chair actor)
-    if (SeatAnchor->GetOwner())
-    {
-        GetCapsuleComponent()->IgnoreActorWhenMoving(SeatAnchor->GetOwner(), true);
-    }
-
-    // 3. Attach to the socket
-    FAttachmentTransformRules AttachmentRules(
-        EAttachmentRule::SnapToTarget, // Location
-        EAttachmentRule::SnapToTarget, // Rotation
-        EAttachmentRule::KeepWorld,
-        false// Scale
-    );
-    AttachToComponent(SeatAnchor, AttachmentRules);
-
-    // 4. Set State (For Animation)
-    bIsSitting = true;
     
-    // Optional: Cancel any current velocity
-    SetActorEnableCollision(false); // Often easier to just disable capsule collision entirely while seated
+    // 2. Disable Collision (Crucial so we don't bump into the chair while sliding)
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // 3. ATTACHMENT (Logic)
+    // We attach NOW so if the ship moves, we move.
+    // BUT: We use KeepWorldTransform. 
+    // This means we stay standing at the EntryPoint visually for this specific frame.
+    AttachToComponent(SeatAnchor, FAttachmentTransformRules::KeepWorldTransform);
+
+    // 4. Setup the Smooth Transition (Visuals)
+    TargetSeatComponent = SeatAnchor;
+    SitStartLocation = GetActorLocation();
+    SitStartRotation = GetActorQuat();
+    
+    SitTransitionAlpha = 0.0f;
+    bIsSittingDownTransition = true;
+    bIsSitting = true; // Updates AnimBP to start playing the Sit animation
 }
 
 void ASolaraqCharacterPawn::StandUp()
 {
     if (!bIsSitting) return;
 
-    // 1. Detach
+    bIsSittingDownTransition = false; // Stop any active sitting logic
+    bIsSitting = false; // Triggers AnimBP to play "Stand Up" or return to Idle
+
     DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 
-    // 2. Re-enable collision
-    SetActorEnableCollision(true);
+    // Re-enable collision
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     
-    // 3. Re-enable movement
+    // Teleport to Entry Point (Optional: Or slide back out)
+    // For now, we pop out to avoid getting stuck
+    const FVector ExitLoc = GetActorLocation() + (GetActorForwardVector() * 100.f);
+    SetActorLocation(ExitLoc, true);
+
     if (GetCharacterMovement())
     {
         GetCharacterMovement()->SetMovementMode(MOVE_Walking);
     }
-
-    // 4. Move slightly forward so we aren't inside the chair
-    const FVector ExitLoc = GetActorLocation() + (GetActorForwardVector() * 80.0f);
-    SetActorLocation(ExitLoc, true); // Sweep=true to avoid walls
-
-    // 5. Set State
-    bIsSitting = false;
 }
 
 void ASolaraqCharacterPawn::BeginPlay()
@@ -454,6 +449,36 @@ void ASolaraqCharacterPawn::Tick(float DeltaTime)
                 0,
                 5.f
             );
+        }
+    }
+
+    // --- HANDLE SMOOTH SITTING TRANSITION ---
+    if (bIsSittingDownTransition && TargetSeatComponent)
+    {
+        SitTransitionAlpha += DeltaTime / SitTransitionDuration;
+
+        if (SitTransitionAlpha >= 1.0f)
+        {
+            // FINISHED: Snap exactly to target to fix any floating point errors
+            SetActorRelativeLocation(FVector::ZeroVector);
+            SetActorRelativeRotation(FRotator::ZeroRotator);
+            bIsSittingDownTransition = false;
+        }
+        else
+        {
+            // IN PROGRESS: Interpolate World Location/Rotation
+            
+            // Get where the seat is NOW (in case ship is moving)
+            FVector TargetLoc = TargetSeatComponent->GetComponentLocation();
+            FQuat TargetRot = TargetSeatComponent->GetComponentQuat();
+
+            // Lerp Location
+            FVector NewLoc = FMath::Lerp(SitStartLocation, TargetLoc, SitTransitionAlpha);
+            
+            // Slerp Rotation (Smooth turn to face forward)
+            FQuat NewRot = FQuat::Slerp(SitStartRotation, TargetRot, SitTransitionAlpha);
+
+            SetActorLocationAndRotation(NewLoc, NewRot);
         }
     }
 }

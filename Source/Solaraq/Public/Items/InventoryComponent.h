@@ -54,10 +54,10 @@ struct FInventorySlot
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Inventory")
     TObjectPtr<UItemDataAssetBase> ItemData = nullptr;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory", meta = (ClampMin = "0"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Inventory", meta = (ClampMin = "0"))
     int32 Quantity = 0;
 
     // Helper to quickly check if the slot is empty
@@ -86,47 +86,47 @@ public:
 
     // The main function to add an item to the inventory.
     // Returns the quantity of items that could not be added (e.g., if inventory is full).
-    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    UFUNCTION(BlueprintCallable, Category = "Solaraq|Inventory")
     int32 AddItem(UItemDataAssetBase* ItemToAdd, int32 Quantity);
 
-    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    UFUNCTION(BlueprintCallable, Category = "Solaraq|Inventory")
     bool AddItemAt(const FPlacedItem& Item, FIntPoint TopLeft);
     
-    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    UFUNCTION(BlueprintCallable, Category = "Solaraq|Inventory")
     void UseItem(const FGuid& ItemID);
     
     // The main function to remove a quantity of a specific item.
-    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    UFUNCTION(BlueprintCallable, Category = "Solaraq|Inventory")
     void RemoveItem(const FGuid& ItemID, int32 QuantityToRemove);
     
     // Checks if the inventory contains at least a certain quantity of an item.
-    UFUNCTION(BlueprintPure, Category = "Inventory")
+    UFUNCTION(BlueprintPure, Category = "Solaraq|Inventory")
     bool HasItem(UItemDataAssetBase* ItemToFind, int32 Quantity = 1) const;
 
     // The actual list of items in the inventory.
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Inventory")
     TArray<FInventorySlot> Items;
     
     // The delegate that is broadcasted whenever the inventory contents change.
-    UPROPERTY(BlueprintAssignable, Category = "Inventory")
+    UPROPERTY(BlueprintAssignable, Category = "Solaraq|Inventory")
     FOnInventoryUpdated OnInventoryUpdated;
 
-    UFUNCTION(BlueprintCallable, Category="Inventory")
+    UFUNCTION(BlueprintCallable, Category="Solaraq|Inventory")
     bool MoveItem(const FGuid& ItemID, FIntPoint NewTopLeft);
 
     /** Checks if an item can be moved to a new location without actually moving it. */
     bool CanMoveItemTo(const FGuid& ItemID, FIntPoint NewTopLeft);
 
     /** Moves an item from this inventory to a Target Inventory Component. */
-    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    UFUNCTION(BlueprintCallable, Category = "Solaraq|Inventory")
     bool TransferItemTo(UInventoryComponent* TargetInventory, const FGuid& ItemID, FIntPoint TargetPos);
     
     /** Returns the configured width of the inventory grid. */
-    UFUNCTION(BlueprintPure, Category = "Inventory|Grid")
+    UFUNCTION(BlueprintPure, Category = "Solaraq|Inventory|Grid")
     int32 GetGridWidth() const;
 
     /** Returns the configured height of the inventory grid. */
-    UFUNCTION(BlueprintPure, Category = "Inventory|Grid")
+    UFUNCTION(BlueprintPure, Category = "Solaraq|Inventory|Grid")
     int32 GetGridHeight() const;
 
     /** Returns a constant reference to the array of all placed items. */
@@ -137,14 +137,14 @@ protected:
 
 private:
     // The list of all items currently placed in the inventory.
-    UPROPERTY(VisibleAnywhere, Category = "Inventory")
+    UPROPERTY(VisibleAnywhere, Category = "Solaraq|Inventory")
     TArray<FPlacedItem> PlacedItems;
 
     // The total size of the inventory grid.
-    UPROPERTY(EditDefaultsOnly, Category = "Inventory")
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
     int32 InventoryWidth = 8;
     
-    UPROPERTY(EditDefaultsOnly, Category = "Inventory")
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Inventory")
     int32 InventoryHeight = 10;
 
     // Helper function to check if a specific area is available.

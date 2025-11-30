@@ -15,29 +15,44 @@ void USolaraqInventoryGridWidget::ConfigureGrid(int32 InWidth, int32 InHeight, f
     
 	SlotWidgets.Empty(); // Clear existing cache
 
-	if (SlotCanvas && InventorySlotClass)
+	// --- DEBUGGING CHECKS ---
+	if (!SlotCanvas)
 	{
-		SlotCanvas->ClearChildren();
-		for (int32 Y = 0; Y < GridHeight; ++Y)
+		UE_LOG(LogTemp, Error, TEXT("ConfigureGrid FAILED: 'SlotCanvas' is NULL. Check WBP_InventoryGrid. Is the Canvas Panel named 'SlotCanvas' and is 'Is Variable' checked?"));
+		return;
+	}
+
+	if (!InventorySlotClass)
+	{
+		UE_LOG(LogTemp, Error, TEXT("ConfigureGrid FAILED: 'InventorySlotClass' is NULL. Open WBP_InventoryGrid details and assign WBP_InventorySlot."));
+		return;
+	}
+	// ------------------------
+
+	SlotCanvas->ClearChildren();
+	
+	for (int32 Y = 0; Y < GridHeight; ++Y)
+	{
+		for (int32 X = 0; X < GridWidth; ++X)
 		{
-			for (int32 X = 0; X < GridWidth; ++X)
+			USolaraqInventorySlotWidget* SlotWidget = CreateWidget<USolaraqInventorySlotWidget>(this, InventorySlotClass);
+			if (SlotWidget)
 			{
-				USolaraqInventorySlotWidget* SlotWidget = CreateWidget<USolaraqInventorySlotWidget>(this, InventorySlotClass);
-				if (SlotWidget)
-				{
-					// Default to empty box (all borders true)
-					SlotWidget->ConfigureSlotAppearance(true, true, true, true);
-                    
-					UCanvasPanelSlot* CanvasSlot = SlotCanvas->AddChildToCanvas(SlotWidget);
-					CanvasSlot->SetPosition(FVector2D(X * SlotPixelSize, Y * SlotPixelSize));
-					CanvasSlot->SetSize(FVector2D(SlotPixelSize, SlotPixelSize));
-                    
-					// Cache it for Redraw updates
-					SlotWidgets.Add(SlotWidget);
-				}
+				// Default to empty box (all borders true)
+				SlotWidget->ConfigureSlotAppearance(true, true, true, true);
+                
+				UCanvasPanelSlot* CanvasSlot = SlotCanvas->AddChildToCanvas(SlotWidget);
+				CanvasSlot->SetPosition(FVector2D(X * SlotPixelSize, Y * SlotPixelSize));
+				CanvasSlot->SetSize(FVector2D(SlotPixelSize, SlotPixelSize));
+                
+				// Cache it for Redraw updates
+				SlotWidgets.Add(SlotWidget);
 			}
 		}
 	}
+	
+	// Set desired size so parent containers (like the Container Window) know how big this grid is
+	SetDesiredSizeInViewport(FVector2D(GridWidth * SlotPixelSize, GridHeight * SlotPixelSize));
 }
 
 void USolaraqInventoryGridWidget::SetContextInventory(UInventoryComponent* InInventory)
@@ -53,18 +68,24 @@ void USolaraqInventoryGridWidget::UpdateState(const TArray<FPlacedItem>& InItems
 
 void USolaraqInventoryGridWidget::Redraw()
 {
+	// FIX: Automatically fetch the latest data if we have a context inventory. 
+	// This ensures that when the delegate calls Redraw(), we aren't displaying stale data.
+	if (ContextInventory)
+	{
+		CachedItems = ContextInventory->GetPlacedItems();
+	}
+
+	if (SlotWidgets.Num() == 0) return; // Grid not configured yet
+
     // --- PART 1: Calculate Grid State for Backgrounds ---
     
-    // Create a temporary map representing the grid: Coord -> ItemID
     TMap<FIntPoint, FGuid> OccupiedSlots;
 
     for (const FPlacedItem& Item : CachedItems)
     {
-        // Ghosting: Treat ignored item as if it doesn't exist
         if (ItemIDToIgnore.IsValid() && Item.ItemID == ItemIDToIgnore) continue;
         if (!Item.ItemData) continue;
 
-        // Mark all cells occupied by this item
         for (int32 Y = 0; Y < Item.ItemData->Dimensions.Y; ++Y)
         {
             for (int32 X = 0; X < Item.ItemData->Dimensions.X; ++X)
@@ -74,8 +95,6 @@ void USolaraqInventoryGridWidget::Redraw()
         }
     }
 
-    // Update the appearance of every background slot
-    // SlotWidgets is a flat array, ordered Row by Row (Y then X)
     for (int32 i = 0; i < SlotWidgets.Num(); ++i)
     {
         USolaraqInventorySlotWidget* SlotWidget = SlotWidgets[i];
@@ -86,24 +105,15 @@ void USolaraqInventoryGridWidget::Redraw()
         FIntPoint Current(X, Y);
 
         bool bIsOccupied = OccupiedSlots.Contains(Current);
-        FGuid CurrentID = bIsOccupied ? OccupiedSlots[Current] : FGuid(); // Empty GUID if not occupied
+        FGuid CurrentID = bIsOccupied ? OccupiedSlots[Current] : FGuid(); 
 
-        // Helper to check neighbors
-        // A border exists if:
-        // 1. We are empty (always borders), OR
-        // 2. We are occupied, and the neighbor is EITHER empty OR has a DIFFERENT Item ID.
         auto NeedsBorder = [&](FIntPoint NeighborCoord) -> bool
         {
-            if (!bIsOccupied) return true; // Empty slots always have borders
-
-            // Check boundaries
-            if (NeighborCoord.X < 0 || NeighborCoord.Y < 0 || NeighborCoord.X >= GridWidth || NeighborCoord.Y >= GridHeight)
-                return true; // Edge of grid is always a border
-
-            if (!OccupiedSlots.Contains(NeighborCoord)) return true; // Neighbor is empty
-
+            if (!bIsOccupied) return true;
+            if (NeighborCoord.X < 0 || NeighborCoord.Y < 0 || NeighborCoord.X >= GridWidth || NeighborCoord.Y >= GridHeight) return true; 
+            if (!OccupiedSlots.Contains(NeighborCoord)) return true; 
             FGuid NeighborID = OccupiedSlots[NeighborCoord];
-            return NeighborID != CurrentID; // True if IDs don't match (draw border separation)
+            return NeighborID != CurrentID; 
         };
 
         bool bTop    = NeedsBorder(Current + FIntPoint(0, -1));
@@ -113,7 +123,6 @@ void USolaraqInventoryGridWidget::Redraw()
 
         SlotWidget->ConfigureSlotAppearance(bTop, bRight, bBottom, bLeft);
     }
-
 
     // --- PART 2: Draw Item Icons ---
 
@@ -142,6 +151,7 @@ void USolaraqInventoryGridWidget::Redraw()
     }
 }
 
+// This function was missing in the previous snippet, causing the Linker Error
 bool USolaraqInventoryGridWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
 {
 	Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);

@@ -119,7 +119,18 @@ protected:
 	
 	
 private:
+	// --- Smooth Sitting Variables ---
+	bool bIsSittingDownTransition = false;
+	FVector SitStartLocation;
+	FQuat SitStartRotation;
     
+	// We store the pointer to the component we want to end up at
+	UPROPERTY()
+	USceneComponent* TargetSeatComponent;
+
+	float SitTransitionAlpha = 0.0f;
+	float SitTransitionDuration = 1.0f; // Takes 1 second to sit (matches anim length)
+	
 public:
 	virtual void Tick(float DeltaTime) override;
 

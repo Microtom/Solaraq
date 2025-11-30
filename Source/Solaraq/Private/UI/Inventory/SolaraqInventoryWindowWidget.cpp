@@ -116,54 +116,56 @@ void USolaraqInventoryWindowWidget::HandleGridDrop(const FPlacedItem& DroppedIte
 {
 	if (!InventoryComp) return;
 
+	// Identify where the item is coming FROM
+	UInventoryComponent* SourceComp = SourceGrid->GetContextInventory();
+
     // CASE 1: Moving item within the Backpack (Reorganizing)
-    if (SourceGrid == TargetGrid)
+    // Source Inventory == Target Inventory
+    if (SourceComp == InventoryComp)
     {
         InventoryComp->MoveItem(DroppedItem.ItemID, TargetCoord);
-        return;
     }
-
-    // CASE 2: Dragging FROM Equipment TO Backpack
-    // Since Equipment grids don't have a ContextInventory set, we can check for that,
-    // or we can simply check if the item exists in the inventory.
-    
-    // Attempt to move. If MoveItem returns false because ID isn't found, it implies it's external.
-    // However, clean logic is better:
-    
-    if (APawn* OwningPawn = GetOwningPlayerPawn())
+	// CASE 2: Dragging FROM External Inventory (Container) TO Backpack
+	// Source is valid, but it is NOT the backpack.
+	else if (SourceComp)
+	{
+		SourceComp->TransferItemTo(InventoryComp, DroppedItem.ItemID, TargetCoord);
+	}
+    // CASE 3: Dragging FROM Equipment
+    // Equipment slots usually don't have a ContextInventory set on the grid/slot widget, so SourceComp is null.
+    else 
     {
-        if (USolaraqEquipmentComponent* EquipComp = OwningPawn->FindComponentByClass<USolaraqEquipmentComponent>())
-        {
-            // We assume that if it's not from the same grid, it's from equipment (in this specific window setup).
-            // Logic: 
-            // 1. Remove from Equipment Slot
-            // 2. Add to Inventory at TargetCoord
+	    if (APawn* OwningPawn = GetOwningPlayerPawn())
+	    {
+	        if (USolaraqEquipmentComponent* EquipComp = OwningPawn->FindComponentByClass<USolaraqEquipmentComponent>())
+	        {
+	            // Logic: 
+	            // 1. Remove from Equipment Slot
+	            // 2. Add to Inventory at TargetCoord
 
-            FPlacedItem RemovedItem;
-            // Use the data in DroppedItem to know which slot to unequip from
-            if (EquipComp->UnequipItem(DroppedItem.ItemData->EquipmentSlot, RemovedItem))
-            {
-                // Try to place it at the specific drop location
-                bool bAdded = InventoryComp->AddItemAt(RemovedItem, TargetCoord);
+	            FPlacedItem RemovedItem;
+	            // Use the data in DroppedItem to know which slot to unequip from
+	            if (EquipComp->UnequipItem(DroppedItem.ItemData->EquipmentSlot, RemovedItem))
+	            {
+	                // Try to place it at the specific drop location
+	                bool bAdded = InventoryComp->AddItemAt(RemovedItem, TargetCoord);
 
-                if (!bAdded)
-                {
-                    // If target spot was full (e.g. dropped on top of another item), 
-                    // fallback to standard AddItem (finds first free spot)
-                    // or re-equip it (cancel drop).
-                    
-                    // Let's try standard add (auto-find spot)
-                    int32 Remaining = InventoryComp->AddItem(RemovedItem.ItemData, RemovedItem.Quantity);
-                    
-                    if (Remaining > 0)
-                    {
-                        // Inventory completely full? Put it back on equipment.
-                        FPlacedItem Dummy;
-                        EquipComp->EquipItem(RemovedItem, RemovedItem.ItemData->EquipmentSlot, Dummy);
-                    }
-                }
-            }
-        }
+	                if (!bAdded)
+	                {
+	                    // If target spot was full (e.g. dropped on top of another item), 
+	                    // fallback to standard AddItem (finds first free spot)
+	                    int32 Remaining = InventoryComp->AddItem(RemovedItem.ItemData, RemovedItem.Quantity);
+	                    
+	                    if (Remaining > 0)
+	                    {
+	                        // Inventory completely full? Put it back on equipment.
+	                        FPlacedItem Dummy;
+	                        EquipComp->EquipItem(RemovedItem, RemovedItem.ItemData->EquipmentSlot, Dummy);
+	                    }
+	                }
+	            }
+	        }
+	    }
     }
 }
 

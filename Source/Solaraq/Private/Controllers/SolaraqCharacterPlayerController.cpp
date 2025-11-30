@@ -1,6 +1,6 @@
 // SolaraqCharacterPlayerController.cpp
 
-#include "Controllers/SolaraqCharacterPlayerController.h" // Adjust to your path
+#include "Controllers/SolaraqCharacterPlayerController.h" 
 #include "Pawns/SolaraqCharacterPawn.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -11,9 +11,9 @@
 #include "Blueprint/UserWidget.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
-#include "Core/SolaraqGameInstance.h" // For level transition
+#include "Core/SolaraqGameInstance.h"
 #include "GameFramework/SpringArmComponent.h"
-#include "Kismet/GameplayStatics.h" // For OpenLevel
+#include "Kismet/GameplayStatics.h"
 #include "Logging/SolaraqLogChannels.h"
 #include "Systems/FishingSubsystem.h"
 #include "UI/SolaraqHUDWidget.h"
@@ -21,6 +21,8 @@
 #include "UI/Inventory/SolaraqEquipmentWindowWidget.h"
 #include "UI/Inventory/SolaraqInventoryWindowWidget.h"
 #include "UI/Inventory/SolaraqInventoryGridWidget.h"
+#include "UI/Inventory/SolaraqContainerWindowWidget.h"
+#include "Actors/Interactables/SolaraqContainerBase.h"
 
 ASolaraqCharacterPlayerController::ASolaraqCharacterPlayerController()
 {
@@ -60,19 +62,23 @@ void ASolaraqCharacterPlayerController::HideFishingHUD()
     if (FishingHUDWidgetInstance && FishingHUDWidgetInstance->IsInViewport())
     {
         FishingHUDWidgetInstance->RemoveFromParent();
-        // We can let it be garbage collected or null it out if we want to be explicit
-        // For this simple case, just removing it is fine. It will be re-used next time.
     }
 }
 
-void ASolaraqCharacterPlayerController::MoveToAndInteract(AInteractableChair* TargetChair)
+void ASolaraqCharacterPlayerController::RequestMoveToInteract(AActor* TargetActor, FVector TargetLocation,
+    float AcceptanceRadius)
 {
-    if (!TargetChair) return;
+    if (!TargetActor) return;
 
-    PendingInteractionChair = TargetChair;
-    
-    // Start moving immediately
-    UAIBlueprintHelperLibrary::SimpleMoveToLocation(this, PendingInteractionChair->GetEntryPointLocation());
+    PendingInteractableActor = TargetActor;
+    PendingInteractionLocation = TargetLocation;
+    PendingInteractionRadius = AcceptanceRadius;
+    bIsAutoNavigatingToInteract = true;
+
+    UE_LOG(LogSolaraqSystem, Log, TEXT("RequestMoveToInteract: Moving to %s with Radius %.2f"), *TargetLocation.ToString(), AcceptanceRadius);
+
+    // Call MoveTo ONLY ONCE here. Do not spam it in Tick.
+    UAIBlueprintHelperLibrary::SimpleMoveToLocation(this, PendingInteractionLocation);
 }
 
 void ASolaraqCharacterPlayerController::ApplyCharacterInputMappingContext()
@@ -81,11 +87,11 @@ void ASolaraqCharacterPlayerController::ApplyCharacterInputMappingContext()
     {
         if (UEnhancedInputLocalPlayerSubsystem* InputSubsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
         {
-            ClearAllInputContexts(InputSubsystem); // Call base helper
+            ClearAllInputContexts(InputSubsystem); 
 
             if (IMC_CharacterControls)
             {
-                AddInputContext(InputSubsystem, IMC_CharacterControls, 0); // Call base helper
+                AddInputContext(InputSubsystem, IMC_CharacterControls, 0); 
                 UE_LOG(LogSolaraqSystem, Log, TEXT("ASolaraqCharacterPlayerController: Applied CHARACTER Input Mapping Context: %s"), *IMC_CharacterControls->GetName());
             }
             else
@@ -98,13 +104,8 @@ void ASolaraqCharacterPlayerController::ApplyCharacterInputMappingContext()
 
 void ASolaraqCharacterPlayerController::CreateHUD()
 {
-    // If it already exists, do nothing.
-    if (MainHUDWidgetInstance)
-    {
-        return;
-    }
+    if (MainHUDWidgetInstance) return;
 
-    // Check if the class was set in the blueprint editor. This is a critical check.
     if (!MainHUDWidgetClass)
     {
         UE_LOG(LogSolaraqSystem, Error, TEXT("CreateHUD FAILED: MainHUDWidgetClass is not set in the PlayerController Blueprint!"));
@@ -113,14 +114,11 @@ void ASolaraqCharacterPlayerController::CreateHUD()
 
     UE_LOG(LogSolaraqSystem, Log, TEXT("CreateHUD: Attempting to create widget of class %s."), *MainHUDWidgetClass->GetName());
 	
-    // Create the widget.
     MainHUDWidgetInstance = CreateWidget<USolaraqHUDWidget>(this, MainHUDWidgetClass);
 
-    // Check if creation was successful.
     if (MainHUDWidgetInstance)
     {
         UE_LOG(LogSolaraqSystem, Log, TEXT("CreateHUD: Widget created successfully. Adding to viewport."));
-        // Add it to the viewport. This is the step that makes it visible.
         MainHUDWidgetInstance->AddToViewport();
     }
     else
@@ -138,7 +136,7 @@ void ASolaraqCharacterPlayerController::BeginPlay()
     InputModeData.SetHideCursorDuringCapture(false);
     SetInputMode(InputModeData);
     
-    if (GetPawn()) // Only apply if we already possess a pawn
+    if (GetPawn()) 
     {
         ApplyCharacterInputMappingContext();
     }
@@ -160,7 +158,6 @@ void ASolaraqCharacterPlayerController::OnPossess(APawn* InPawn)
     {
         if (USpringArmComponent* SpringArm = PossessedChar->GetSpringArmComponent())
         {
-            // Sync our target length with the pawn's default to prevent a "snap" on possess.
             TargetZoomLength = SpringArm->TargetArmLength;
         }
         
@@ -191,7 +188,7 @@ void ASolaraqCharacterPlayerController::OnUnPossess()
     }
     
     FString AuthorityPrefix = HasAuthority() ? TEXT("SERVER") : TEXT("CLIENT");
-    APawn* UnpossessedPawn = GetPawn(); // Get pawn before Super::OnUnPossess clears it internally
+    APawn* UnpossessedPawn = GetPawn(); 
     UE_LOG(LogSolaraqMovement, Log, TEXT("%s ASolaraqCharacterPlayerController (%s): OnUnPossess - Unpossessing: %s."),
         *AuthorityPrefix, *GetNameSafe(this), *GetNameSafe(UnpossessedPawn));
     
@@ -211,12 +208,12 @@ void ASolaraqCharacterPlayerController::OnUnPossess()
 void ASolaraqCharacterPlayerController::OnRep_Pawn()
 {
     Super::OnRep_Pawn();
-    ApplyCharacterInputMappingContext(); // Re-apply context on client if pawn changes
+    ApplyCharacterInputMappingContext(); 
 }
 
 void ASolaraqCharacterPlayerController::SetupInputComponent()
 {
-    Super::SetupInputComponent(); // Gets EnhancedInputComponentRef
+    Super::SetupInputComponent(); 
 
     if (!EnhancedInputComponentRef)
     {
@@ -227,10 +224,7 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
     UE_LOG(LogSolaraqSystem, Log, TEXT("ASolaraqCharacterPlayerController: Setting up CHARACTER Input Bindings for %s"), *GetName());
 
     if (CharacterMoveAction) EnhancedInputComponentRef->BindAction(CharacterMoveAction, ETriggerEvent::Triggered, this, &ASolaraqCharacterPlayerController::HandleCharacterMoveInput);
-    // Bind other character actions (Look, Jump) here if you add them
 
-    // InteractAction is defined in ASolaraqBasePlayerController
-    // Bind it here for character-specific interaction
     if (InteractAction) { 
         EnhancedInputComponentRef->BindAction(InteractAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleCharacterInteractInput);
         UE_LOG(LogSolaraqTransition, Warning, TEXT("ASolaraqCharacterPlayerController %s: SetupInputComponent - SUCCESSFULLY BOUND InteractAction to HandleCharacterInteractInput."), *GetNameSafe(this));
@@ -253,8 +247,6 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
     }
     if (PointerMoveAction)
     {
-        // We bind ONE function. The triggers in the IMC will determine WHEN it gets called.
-        // ETriggerEvent::Triggered works for both Tap (on release) and Hold (continuously).
         EnhancedInputComponentRef->BindAction(PointerMoveAction, ETriggerEvent::Triggered, this, &ASolaraqCharacterPlayerController::HandlePointerMove);
     }
     if (ToggleFishingModeAction)
@@ -263,12 +255,8 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
     }
     if (SprintAction)
     {
-        // Bind the "Started" event (key press) to the start sprinting function
         EnhancedInputComponentRef->BindAction(SprintAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleSprintStarted);
-        
-        // Bind the "Completed" event (key release) to the stop sprinting function
         EnhancedInputComponentRef->BindAction(SprintAction, ETriggerEvent::Completed, this, &ASolaraqCharacterPlayerController::HandleSprintCompleted);
-
         UE_LOG(LogSolaraqMovement, Log, TEXT("CharacterPC: Bound SprintAction successfully."));
     }
     else
@@ -277,7 +265,6 @@ void ASolaraqCharacterPlayerController::SetupInputComponent()
     }
     if (ToggleInventoryAction)
     {
-        // The name of the handler function has changed for clarity
         EnhancedInputComponentRef->BindAction(ToggleInventoryAction, ETriggerEvent::Started, this, &ASolaraqCharacterPlayerController::HandleCharacterToggleInventory);
         UE_LOG(LogSolaraqSystem, Log, TEXT("CharacterPC: Bound ToggleInventoryAction successfully."));
     }
@@ -296,7 +283,9 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
     
-    if (ASolaraqCharacterPawn* CharPawn = GetControlledCharacter())
+    ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
+
+    if (CharPawn)
     {
         if (USpringArmComponent* SpringArm = CharPawn->GetSpringArmComponent())
         {
@@ -306,7 +295,6 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
                 bIsInFishingMode_ThisFrame = (FishingSS->GetCurrentState() != EFishingState::Idle);
             }
 
-            // --- State Transition Logic ---
             if (bIsInFishingMode_ThisFrame && !bWasInFishingMode_LastFrame)
             {
                 PreFishingZoomLength = TargetZoomLength;
@@ -316,28 +304,24 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
                 TargetZoomLength = PreFishingZoomLength;
             }
 
-            // --- Continuous State Logic ---
             if (bIsInFishingMode_ThisFrame)
             {
-                // While in fishing mode:
                 TargetZoomLength = FishingModeZoomLength;
                 TargetCameraOffset = CharPawn->GetTargetAimingRotation().Vector() * CharPawn->FishingCameraRadius;
                 
-                // Reset custom lag state when entering fishing mode
                 CurrentCameraTargetOffset = FVector::ZeroVector;
                 bIsInForcedRejoinState = false;
                 TimeAtMaxOffset = 0.f;
             }
-            else // --- NOT FISHING: USE CUSTOM LOOK-AHEAD LOGIC ---
+            else 
             {
                 if (bUseCustomCameraLag)
                 {
                     const FVector CharacterVelocity = CharPawn->GetVelocity();
                     const FVector VelocityDirection = CharacterVelocity.GetSafeNormal();
 
-                    if (CharacterVelocity.SizeSquared() > 1.f) // If character is moving
+                    if (CharacterVelocity.SizeSquared() > 1.f) 
                     {
-                        // Check for significant direction change to reset rejoin logic
                         if (FVector::DotProduct(VelocityDirection, LastMovementDirection) < RejoinDirectionChangeThreshold)
                         {
                             bIsInForcedRejoinState = false;
@@ -346,22 +330,16 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
 
                         if (bIsInForcedRejoinState)
                         {
-                            // We are forcing the camera to shrink back towards the character.
-                            // It will stay in this state until the player stops or changes direction.
                             if (RejoinInterpolationMethod == ERejoinInterpolationType::Linear)
                             {
                                 CurrentCameraTargetOffset = FMath::VInterpConstantTo(CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraForcedRejoinSpeed_Linear);
                             }
-                            else // InterpTo
+                            else 
                             {
                                 CurrentCameraTargetOffset = FMath::VInterpTo(CurrentCameraTargetOffset, FVector::ZeroVector, DeltaTime, CameraForcedRejoinSpeed_Interp);
                             }
-
-                            // --- FIX: REMOVED THE PREMATURE EXIT CONDITION ---
-                            // The logic to exit the rejoin state is now solely handled by the player
-                            // stopping or changing direction.
                         }
-                        else // Normal look-ahead behavior
+                        else 
                         {
                             const FVector DesiredOffset = VelocityDirection * CameraLookAheadFactor;
                             CurrentCameraTargetOffset = FMath::VInterpTo(CurrentCameraTargetOffset, DesiredOffset, DeltaTime, CustomCameraLagSpeed);
@@ -384,9 +362,8 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
                         }
                         LastMovementDirection = VelocityDirection;
                     }
-                    else // If character is standing still
+                    else 
                     {
-                        // Reset all states and recenter the camera
                         bIsInForcedRejoinState = false;
                         TimeAtMaxOffset = 0.0f;
                         LastMovementDirection = FVector::ZeroVector;
@@ -395,13 +372,12 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
                     
                     TargetCameraOffset = CurrentCameraTargetOffset;
                 }
-                else // bUseCustomCameraLag is false
+                else 
                 {
                     TargetCameraOffset = FVector::ZeroVector;
                 }
             }
 
-            // --- UNIVERSAL INTERPOLATION (applies to all states) ---
             SpringArm->TargetArmLength = FMath::FInterpTo(SpringArm->TargetArmLength, TargetZoomLength, DeltaTime, ZoomInterpSpeed);
             SpringArm->TargetOffset = FMath::VInterpTo(SpringArm->TargetOffset, TargetCameraOffset, DeltaTime, CameraOffsetInterpSpeed);
 
@@ -417,41 +393,65 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
         }
     }
 
-    if (PendingInteractionChair && GetControlledCharacter())
+    // --- GENERIC AUTO-WALK LOGIC ---
+    if (bIsAutoNavigatingToInteract && PendingInteractableActor)
     {
         FVector CurrentLoc = GetControlledCharacter()->GetActorLocation();
-        FVector TargetLoc = PendingInteractionChair->GetEntryPointLocation();
+        CurrentLoc.Z = PendingInteractionLocation.Z; 
         
-        // Ignore Z difference for distance check
-        CurrentLoc.Z = TargetLoc.Z;
+        float DistSq = FVector::DistSquared(CurrentLoc, PendingInteractionLocation);
+        float RadiusSq = PendingInteractionRadius * PendingInteractionRadius;
 
-        float Distance = FVector::Dist(CurrentLoc, TargetLoc);
-
-        if (Distance <= InteractionAcceptanceRadius)
+        // Check if we arrived
+        if (DistSq <= RadiusSq)
         {
-            // We have arrived! Stop moving.
+            // 1. Stop Moving
             StopMovement();
-            
-            // Execute the Sit
-            PendingInteractionChair->Sit(GetControlledCharacter());
-            
-            // Clear the pending pointer so we don't try to sit again every frame
-            PendingInteractionChair = nullptr;
+            bIsAutoNavigatingToInteract = false;
+
+            // 2. Trigger the Interface again
+            if (PendingInteractableActor->Implements<UInteractableInterface>())
+            {
+                UE_LOG(LogSolaraqSystem, Log, TEXT("Auto-Nav complete. Triggering Interact on %s"), *PendingInteractableActor->GetName());
+                IInteractableInterface::Execute_Interact(PendingInteractableActor, GetControlledCharacter());
+            }
+
+            // 3. Clear pointer
+            PendingInteractableActor = nullptr;
         }
         else
         {
-            // Keep moving to the target (ensures we don't stop if path recalculates)
-            // Note: In a real AI setup, you'd use MoveToActor, but SimpleMove works for click-to-move
-            UAIBlueprintHelperLibrary::SimpleMoveToLocation(this, TargetLoc);
+            // If we are still moving, we don't spam SimpleMoveToLocation.
+            // But we should check if we got stuck.
+            if (CharPawn && CharPawn->GetVelocity().SizeSquared() < 1.0f)
+            {
+                // Optional: We are trying to move but velocity is near zero. 
+                // We might be blocked by the object itself (Radius too small) or geometry.
+                // Simple workaround: re-issue move occasionally or abort after timeout.
+                // For now, we trust SimpleMoveToLocation to navigate around or stop.
+                
+                // If we are very close but blocked, we might want to just trigger interaction anyway if within a reasonable 'reach' distance (e.g. 200 units)
+                if (DistSq < (200.0f * 200.0f))
+                {
+                     // Force success if we are kinda close but stuck
+                     // StopMovement(); 
+                     // bIsAutoNavigatingToInteract = false;
+                     // ... trigger interact ...
+                }
+            }
         }
     }
 }
 
 void ASolaraqCharacterPlayerController::HandleCharacterMoveInput(const FInputActionValue& Value)
 {
-    if (PendingInteractionChair)
+    // If player touches WASD, cancel the auto-interaction
+    if (bIsAutoNavigatingToInteract)
     {
-        PendingInteractionChair = nullptr;
+        UE_LOG(LogSolaraqSystem, Log, TEXT("Auto-Nav cancelled by player input."));
+        bIsAutoNavigatingToInteract = false;
+        PendingInteractableActor = nullptr;
+        StopMovement(); // Ensure navigation path is cleared
     }
     
     if (UFishingSubsystem* FishingSubsystem = GetWorld()->GetSubsystem<UFishingSubsystem>())
@@ -463,31 +463,110 @@ void ASolaraqCharacterPlayerController::HandleCharacterMoveInput(const FInputAct
         }
     }
     
-    StopMovement();
-    
+    // Pass input to pawn
     ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
     if (CharPawn)
     {
         const FVector2D MovementVector = Value.Get<FVector2D>();
         CharPawn->HandleMoveInput(MovementVector);
     }
-    
 }
 
 void ASolaraqCharacterPlayerController::HandlePointerMove(const FInputActionValue& Value)
 {
+    // If we click, we cancel previous auto-nav
+    if (bIsAutoNavigatingToInteract)
+    {
+        bIsAutoNavigatingToInteract = false;
+        PendingInteractableActor = nullptr;
+    }
+
     FHitResult Hit;
     if (GetHitResultUnderCursor(ECC_Visibility, false, Hit))
     {
-        if (Hit.bBlockingHit)
+        if (Hit.bBlockingHit && Hit.GetActor())
         {
-            // This function now handles both taps and holds seamlessly.
-            // It simply moves to wherever the cursor is when a valid trigger fires.
-            MoveToDestination(Hit.Location);
+            // 1. Interactable Actor
+            if (Hit.GetActor()->Implements<UInteractableInterface>())
+            {
+                // Trigger Interact. The object determines if we are close enough.
+                IInteractableInterface::Execute_Interact(Hit.GetActor(), GetControlledCharacter());
+            }
+            // 2. Ground
+            else
+            {
+                MoveToDestination(Hit.Location);
+            }
         }
     }
 }
 
+void ASolaraqCharacterPlayerController::OpenContainerInventory(ASolaraqContainerBase* Container)
+{
+    if (!Container) return;
+    if (!ContainerWindowWidgetClass)
+    {
+        UE_LOG(LogSolaraqSystem, Error, TEXT("OpenContainerInventory FAILED: ContainerWindowWidgetClass is not set in PC Blueprint!"));
+        return;
+    }
+    if (!MainHUDWidgetInstance) return;
+
+    UE_LOG(LogSolaraqSystem, Log, TEXT("PC: Opening Container Inventory for %s"), *Container->GetName());
+
+    // 1. Close existing container window if any
+    if (ContainerWindowInstance)
+    {
+        ContainerWindowInstance->RemoveFromParent();
+        ContainerWindowInstance = nullptr;
+    }
+
+    // 2. Create the Window
+    ContainerWindowInstance = CreateWidget<USolaraqContainerWindowWidget>(this, ContainerWindowWidgetClass);
+    if (ContainerWindowInstance)
+    {
+        // 3. Initialize it with the container actor
+        ContainerWindowInstance->InitContainerWindow(Container);
+        
+        // 4. Bind Close Event so we can null our reference
+        ContainerWindowInstance->OnCloseRequested.AddDynamic(this, &ASolaraqCharacterPlayerController::OnContainerClosedByUI);
+
+        // 5. Add to HUD
+        MainHUDWidgetInstance->GetMainCanvas()->AddChildToCanvas(ContainerWindowInstance);
+
+        // 6. Position it (Offset to the right side of screen usually)
+        if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(ContainerWindowInstance->Slot))
+        {
+            CanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 0.f)); // Top-Left Anchors for absolute positioning
+            CanvasSlot->SetAlignment(FVector2D(0.f, 0.f));
+            CanvasSlot->SetPosition(FVector2D(900.0f, 100.0f)); // Hardcoded offset for now, adjust based on viewport size later
+            CanvasSlot->SetAutoSize(true);
+        }
+
+        // 7. Visually Open the Container (Animation)
+        Container->OpenContainer(this);
+
+        // 8. Ensure Player Inventory is also open
+        if (!CharacterInventoryWidgetInstance)
+        {
+            HandleCharacterToggleInventory();
+        }
+        
+        // 9. Ensure Mouse is visible and we can click, but DON'T lock it exclusively to UI
+        FInputModeGameAndUI InputModeData;
+        InputModeData.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+        InputModeData.SetHideCursorDuringCapture(false);
+        SetInputMode(InputModeData);
+        SetShowMouseCursor(true);
+    }
+}
+
+void ASolaraqCharacterPlayerController::OnContainerClosedByUI()
+{
+    UE_LOG(LogSolaraqSystem, Log, TEXT("PC: Container Window Closed via UI."));
+    ContainerWindowInstance = nullptr;
+}
+
+// ... (Rest of functions: HandleCharacterInteractInput, HandlePrimaryUse, etc. remain unchanged)
 void ASolaraqCharacterPlayerController::HandleCharacterInteractInput()
 {
     UE_LOG(LogSolaraqTransition, Warning, TEXT("CharacterPC %s: HandleCharacterInteractInput called."), *GetNameSafe(this));

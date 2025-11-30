@@ -105,27 +105,57 @@ FReply USolaraqItemIconWidget::NativeOnMouseButtonDoubleClick(const FGeometry& I
             APawn* OwningPawn = GetOwningPlayerPawn();
             if (!OwningPawn) return FReply::Unhandled();
 
-            // CASE 1: The icon is in the Inventory (Backpack)
-            // The grid has a reference to the InventoryComponent.
-            if (UInventoryComponent* InvComp = OwningGrid->GetContextInventory())
+            // CASE 1: The icon is in a Grid (Inventory or Container)
+            if (UInventoryComponent* ContextInv = OwningGrid->GetContextInventory())
             {
-                // "Use" the item (Consumes it or Equips it)
-                InvComp->UseItem(ItemInfo.ItemID);
+                AActor* InvOwner = ContextInv->GetOwner();
+                
+                // Sub-Case A: It's the Player's Own Inventory -> Use/Equip the item
+                if (InvOwner == OwningPawn)
+                {
+                    ContextInv->UseItem(ItemInfo.ItemID);
+                }
+                // Sub-Case B: It's a Container (Owner is not the pawn) -> Loot the item
+                else 
+                {
+                    if (UInventoryComponent* PlayerInv = OwningPawn->FindComponentByClass<UInventoryComponent>())
+                    {
+                        // 1. Attempt to add item to player inventory (Auto-find spot logic)
+                        // Note: AddItem returns the quantity REMAINING (that couldn't be added)
+                        int32 Remainder = PlayerInv->AddItem(ItemInfo.ItemData, ItemInfo.Quantity);
+                        
+                        // 2. Calculate how many were successfully moved
+                        int32 AmountMoved = ItemInfo.Quantity - Remainder;
+
+                        if (AmountMoved > 0)
+                        {
+                            // 3. Remove the successfully moved amount from the container
+                            ContextInv->RemoveItem(ItemInfo.ItemID, AmountMoved);
+                            
+                            UE_LOG(LogTemp, Log, TEXT("Looted %d x %s from container."), AmountMoved, *ItemInfo.ItemData->GetName());
+                        }
+                        else
+                        {
+                             UE_LOG(LogTemp, Warning, TEXT("Cannot loot: Inventory Full."));
+                        }
+                    }
+                }
+                
                 return FReply::Handled();
             }
 
-            // CASE 2: The icon is in an Equipment Slot
+            // CASE 2: The icon is in an Equipment Slot (No Context Inventory on Grid)
             // The grid has NO ContextInventory, so we check the EquipmentComponent.
             if (USolaraqEquipmentComponent* EquipComp = OwningPawn->FindComponentByClass<USolaraqEquipmentComponent>())
             {
                 // Check if the item we clicked is actually equipped in the slot it claims to belong to.
                 if (ItemInfo.ItemData)
                 {
-                    EEquipmentSlot EquipmentSlotSlot = ItemInfo.ItemData->EquipmentSlot;
+                    EEquipmentSlot TargetSlot = ItemInfo.ItemData->EquipmentSlot;
                     FPlacedItem EquippedItem;
 
                     // Does the component agree that there is an item in this slot?
-                    if (EquipComp->GetItemInSlot(EquipmentSlotSlot, EquippedItem))
+                    if (EquipComp->GetItemInSlot(TargetSlot, EquippedItem))
                     {
                         // Does the ID match the widget's ID? (Safety check)
                         if (EquippedItem.ItemID == ItemInfo.ItemID)
@@ -133,7 +163,7 @@ FReply USolaraqItemIconWidget::NativeOnMouseButtonDoubleClick(const FGeometry& I
                             // UNEQUIP LOGIC:
                             // 1. Remove from Equipment
                             FPlacedItem RemovedItem;
-                            if (EquipComp->UnequipItem(EquipmentSlotSlot, RemovedItem))
+                            if (EquipComp->UnequipItem(TargetSlot, RemovedItem))
                             {
                                 // 2. Add back to Inventory
                                 if (UInventoryComponent* InvComp = OwningPawn->FindComponentByClass<UInventoryComponent>())
@@ -143,13 +173,7 @@ FReply USolaraqItemIconWidget::NativeOnMouseButtonDoubleClick(const FGeometry& I
                                     // Edge Case: Inventory is full?
                                     if (LeftOver > 0)
                                     {
-                                        // If we couldn't add it back, strictly speaking we should re-equip it
-                                        // or drop it on the ground. For now, let's just log a warning.
                                         UE_LOG(LogTemp, Warning, TEXT("Inventory full! Unequipped item lost (or implement Drop logic here)."));
-                                        
-                                        // Optional: Re-equip if full
-                                        // FPlacedItem Dummy;
-                                        // EquipComp->EquipItem(RemovedItem, Slot, Dummy);
                                     }
                                 }
                             }

@@ -38,5 +38,7 @@ protected:
 	class APawn* SeatedPawn;
 
 public:
-	virtual void Interact_Implementation(APawn* InteractingPawn) override;
+	// -- Interface Implementation --
+    // We use _Implementation because the Interface defined it as BlueprintNativeEvent
+    virtual void Interact_Implementation(APawn* InteractingPawn) override;
 };

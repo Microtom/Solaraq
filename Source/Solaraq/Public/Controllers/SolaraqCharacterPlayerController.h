@@ -8,6 +8,7 @@
 #include "Actors/Interactables/InteractableChair.h"
 #include "SolaraqCharacterPlayerController.generated.h"
 
+class ASolaraqContainerBase;
 class USolaraqEquipmentWindowWidget;
 class USolaraqHUDWidget;
 class USolaraqInventoryWindowWidget;
@@ -35,7 +36,14 @@ public:
     /** Hides and cleans up the fishing HUD widget. */
     void HideFishingHUD();
 
-    void MoveToAndInteract(AInteractableChair* TargetChair);
+    /** 
+     * Generic function called by ANY interactable (Chair, Bed, Chest).
+     * The controller will walk to 'TargetLocation' and then call Interact() on 'TargetActor'.
+     */
+    void RequestMoveToInteract(AActor* TargetActor, FVector TargetLocation, float AcceptanceRadius = 10.0f);
+
+    /** Called by the Container Actor when interaction succeeds. */
+    void OpenContainerInventory(ASolaraqContainerBase* Container);
     
 protected:
     //~ Begin ASolaraqBasePlayerController Interface (Overrides)
@@ -168,6 +176,14 @@ protected:
     
     UPROPERTY()
     TObjectPtr<USolaraqEquipmentWindowWidget> EquipmentWindowInstance;
+
+    /** Widget class for the CONTAINER inventory window. */
+    UPROPERTY(EditDefaultsOnly, Category = "Solaraq|UI")
+    TSubclassOf<USolaraqContainerWindowWidget> ContainerWindowWidgetClass;
+
+    /** Active instance of the container window. */
+    UPROPERTY()
+    TObjectPtr<USolaraqContainerWindowWidget> ContainerWindowInstance;
     
     // --- Input Handling Functions (Character & Shared Handlers) ---
     void HandlePointerMove(const FInputActionValue& Value);
@@ -190,6 +206,9 @@ protected:
 
     UFUNCTION()
     void OnEquipmentClosedByUI();
+
+    UFUNCTION()
+    void OnContainerClosedByUI();
     
 private:
     // No longer need specific PossessedCharacterPawn, GetControlledCharacter() will cast GetPawn()
@@ -225,10 +244,11 @@ private:
 	
     bool bIsMaxOffsetReached = false;        // True if current offset is at/near max
 
-    // The chair we are currently walking towards
+    // We store the generic Actor, not a specific class
     UPROPERTY()
-    AInteractableChair* PendingInteractionChair;
+    TObjectPtr<AActor> PendingInteractableActor;
 
-    // How close we need to be to the entry point to actually sit
-    float InteractionAcceptanceRadius = 10.0f;
+    FVector PendingInteractionLocation;
+    float PendingInteractionRadius;
+    bool bIsAutoNavigatingToInteract = false;
 };

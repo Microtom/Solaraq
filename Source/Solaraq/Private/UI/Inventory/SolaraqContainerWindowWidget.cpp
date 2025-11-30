@@ -1,25 +1,50 @@
 #include "UI/Inventory/SolaraqContainerWindowWidget.h"
 #include "UI/Inventory/SolaraqInventoryGridWidget.h"
-#include "Actors/SolaraqContainerBase.h"
+#include "Actors/Interactables/SolaraqContainerBase.h"
 #include "Components/Button.h"
-#include "UI/SolaraqWidgetDragOperation.h" // Assuming you use this for window dragging
+#include "UI/SolaraqWidgetDragOperation.h" 
+#include "Blueprint/WidgetBlueprintLibrary.h"
 
 void USolaraqContainerWindowWidget::InitContainerWindow(ASolaraqContainerBase* InContainerActor)
 {
+	// Just set the data references here. 
+	// We defer visual setup to NativeConstruct to ensure the widget tree is ready.
 	LinkedContainer = InContainerActor;
 	if (LinkedContainer)
 	{
 		ContainerInventory = LinkedContainer->InventoryComponent;
 	}
+}
 
+void USolaraqContainerWindowWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+
+	// 1. Setup Close Button
+	if (CloseButton)
+	{
+		CloseButton->OnClicked.RemoveDynamic(this, &USolaraqContainerWindowWidget::CloseWindow);
+		CloseButton->OnClicked.AddDynamic(this, &USolaraqContainerWindowWidget::CloseWindow);
+	}
+
+	// 2. Setup Grid
+	// We do this in NativeConstruct because that's when the widget tree is guaranteed to be accessible.
 	if (ContainerInventory && ContainerGrid)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("ContainerWindow NativeConstruct: Configuring Grid. Size: %d x %d"), ContainerInventory->GetGridWidth(), ContainerInventory->GetGridHeight());
+		
+		// CRITICAL FIX: Force the child widget to update its layout immediately.
+		// This ensures 'SlotCanvas' inside the grid is created/bound before we try to use it,
+		// which is common issue with Drag Visuals or dynamic widgets.
+		ContainerGrid->ForceLayoutPrepass();
+
 		ContainerGrid->ConfigureGrid(ContainerInventory->GetGridWidth(), ContainerInventory->GetGridHeight());
 		ContainerGrid->SetContextInventory(ContainerInventory);
 
 		// Bind Updates
-		ContainerInventory->OnInventoryUpdated.RemoveAll(this); // Clear old binds
-		ContainerInventory->OnInventoryUpdated.AddDynamic(ContainerGrid, &USolaraqInventoryGridWidget::Redraw); // Direct bind or via refresh function
+		// We remove bindings from the Grid instance to prevent double-binding if the window is reused
+		ContainerInventory->OnInventoryUpdated.RemoveDynamic(ContainerGrid, &USolaraqInventoryGridWidget::Redraw); 
+		ContainerInventory->OnInventoryUpdated.AddDynamic(ContainerGrid, &USolaraqInventoryGridWidget::Redraw); 
 		
 		// Initial Draw
 		ContainerGrid->UpdateState(ContainerInventory->GetPlacedItems());
@@ -27,15 +52,6 @@ void USolaraqContainerWindowWidget::InitContainerWindow(ASolaraqContainerBase* I
 		// Drop Logic
 		ContainerGrid->OnItemDrop.RemoveDynamic(this, &USolaraqContainerWindowWidget::HandleGridDrop);
 		ContainerGrid->OnItemDrop.AddDynamic(this, &USolaraqContainerWindowWidget::HandleGridDrop);
-	}
-}
-
-void USolaraqContainerWindowWidget::NativeConstruct()
-{
-	Super::NativeConstruct();
-	if (CloseButton)
-	{
-		CloseButton->OnClicked.AddDynamic(this, &USolaraqContainerWindowWidget::CloseWindow);
 	}
 }
 
@@ -53,7 +69,6 @@ void USolaraqContainerWindowWidget::HandleGridDrop(const FPlacedItem& DroppedIte
 	// 2. Dragging FROM Player Backpack TO Container
 	else if (SourceComp)
 	{
-		// Use the new Transfer function
 		SourceComp->TransferItemTo(ContainerInventory, DroppedItem.ItemID, TargetCoord);
 	}
 }
@@ -64,12 +79,64 @@ void USolaraqContainerWindowWidget::CloseWindow()
 	{
 		LinkedContainer->CloseContainer();
 	}
+
+	if (OnCloseRequested.IsBound())
+	{
+		OnCloseRequested.Broadcast();
+	}
+	
 	RemoveFromParent();
 }
 
-// Optional: Add NativeOnDragDetected here if you want the window to be movable like the player inventory
+// --- Dragging Logic ---
+
+FReply USolaraqContainerWindowWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	FEventReply Reply = UWidgetBlueprintLibrary::DetectDragIfPressed(InMouseEvent, this, EKeys::LeftMouseButton);
+	if (Reply.NativeReply.IsEventHandled())
+	{
+		return Reply.NativeReply;
+	}
+	return FReply::Handled();
+}
+
+void USolaraqContainerWindowWidget::NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation)
+{
+	Super::NativeOnDragDetected(InGeometry, InMouseEvent, OutOperation);
+
+	USolaraqWidgetDragOperation* DragOp = NewObject<USolaraqWidgetDragOperation>();
+	if (DragOp)
+	{
+		DragOp->WidgetReference = this;
+
+		FVector2D WidgetAbsPos = InGeometry.GetAbsolutePosition();
+		FVector2D MouseAbsPos = InMouseEvent.GetScreenSpacePosition();
+		DragOp->DragOffset = MouseAbsPos - WidgetAbsPos;
+
+		// Create a visual copy for the drag
+		USolaraqContainerWindowWidget* DragVisual = CreateWidget<USolaraqContainerWindowWidget>(GetOwningPlayer(), GetClass());
+		if (DragVisual)
+		{
+			// Init the data on the drag visual
+			if (LinkedContainer)
+			{
+				DragVisual->InitContainerWindow(LinkedContainer);
+			}
+			DragOp->DefaultDragVisual = DragVisual;
+		}
+		else
+		{
+			DragOp->DefaultDragVisual = this;
+		}
+
+		DragOp->Pivot = EDragPivot::MouseDown; 
+		this->SetVisibility(ESlateVisibility::Hidden); 
+		
+		OutOperation = DragOp;
+	}
+}
+
 bool USolaraqContainerWindowWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
 {
-    // Copy drag logic from PlayerInventoryWindow if you want window dragging
     return Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
 }
