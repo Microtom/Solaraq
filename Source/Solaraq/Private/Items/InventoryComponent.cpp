@@ -112,6 +112,55 @@ bool UInventoryComponent::TransferItemTo(UInventoryComponent* TargetInventory, c
     return false;
 }
 
+void UInventoryComponent::TransferAllItemsTo(UInventoryComponent* TargetInventory)
+{
+    if (!TargetInventory || TargetInventory == this) return;
+
+    UE_LOG(LogTemp, Log, TEXT("Attempting to Transfer ALL items to %s"), *TargetInventory->GetOwner()->GetName());
+
+    // 1. Create a copy of the items. 
+    // We cannot iterate over 'PlacedItems' directly because we will be modifying 
+    // that array (removing items) inside the loop.
+    TArray<FPlacedItem> ItemsToTransfer = PlacedItems;
+
+    bool bAnyTransferOccurred = false;
+
+    // 2. Iterate through the copy
+    for (const FPlacedItem& Item : ItemsToTransfer)
+    {
+        if (!Item.ItemData) continue;
+
+        // 3. Try to add to target. 
+        // AddItem returns the 'Remaining Quantity' that DID NOT fit.
+        // If 0 returned, everything fit. If Item.Quantity returned, nothing fit.
+        int32 RemainingQty = TargetInventory->AddItem(Item.ItemData, Item.Quantity);
+
+        // 4. Calculate how much was actually moved
+        int32 AmountMoved = Item.Quantity - RemainingQty;
+
+        if (AmountMoved > 0)
+        {
+            // 5. Remove the amount that was successfully moved from THIS inventory
+            RemoveItem(Item.ItemID, AmountMoved);
+            bAnyTransferOccurred = true;
+        }
+
+        // We do NOT break/return here if AmountMoved == 0. 
+        // As requested, we continue to the next item in the loop 
+        // to see if smaller items might fit where this one failed.
+    }
+
+    if (bAnyTransferOccurred)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Loot All complete."));
+        // OnInventoryUpdated is broadcast inside RemoveItem, so we don't need to call it here manually.
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Loot All failed: Target inventory full."));
+    }
+}
+
 void UInventoryComponent::BeginPlay()
 {
     Super::BeginPlay();

@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Controllers/SolaraqBasePlayerController.h" // Inherit from our new base
 #include "Pawns/SolaraqCharacterPawn.h"
-#include "Actors/Interactables/InteractableChair.h"
+#include "Actors/Interactables/SolaraqInteractableChair.h"
 #include "SolaraqCharacterPlayerController.generated.h"
 
 class ASolaraqContainerBase;

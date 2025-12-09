@@ -22,6 +22,7 @@
 #include "Core/SolaraqGameInstance.h"
 #include "Engine/DamageEvents.h"
 #include "DrawDebugHelpers.h"
+#include "Components/MiningLaserComponent.h"
 #include "Controllers/SolaraqBasePlayerController.h"
 #include "Engine/World.h" 
 
@@ -107,6 +108,17 @@ ASolaraqShipBase::ASolaraqShipBase()
     {
         MuzzlePoint->SetupAttachment(CollisionAndPhysicsRoot);
         MuzzlePoint->SetRelativeLocation(FVector(100.0f, 0.0f, 0.0f));
+    }
+
+    
+    MiningLaserMount = CreateDefaultSubobject<USceneComponent>(TEXT("MiningLaserMount"));
+    if (MiningLaserMount && ShipMeshComponent)
+    {
+        // Attach to ShipMesh so it moves with the visual ship representation
+        MiningLaserMount->SetupAttachment(ShipMeshComponent);
+        // Offset it slightly forward (adjust 200.0f to match your ship model)
+        MiningLaserMount->SetRelativeLocation(FVector(200.0f, 0.0f, 0.0f));
+        UE_LOG(LogSolaraqMining, Log, TEXT("ASolaraqShipBase Constructor: Created and attached MiningLaserMount on %s"), *GetNameSafe(this));
     }
 
     ProjectileMuzzleSpeed = 8000.0f;
@@ -272,6 +284,21 @@ void ASolaraqShipBase::BeginPlay()
         }
     }
 
+    if (UMiningLaserComponent* LaserComp = FindComponentByClass<UMiningLaserComponent>())
+    {
+        if (MiningLaserMount)
+        {
+            LaserComp->SetLaserMuzzleComponent(MiningLaserMount);
+            // Also explicitly name it so the component's internal logic is happy
+            LaserComp->LaserMuzzleComponentName = MiningLaserMount->GetFName();
+            UE_LOG(LogSolaraqMining, Log, TEXT("Ship %s: Automatically assigned MiningLaserMount to MiningLaserComponent."), *GetName());
+        }
+        else
+        {
+            UE_LOG(LogSolaraqMining, Error, TEXT("Ship %s: MiningLaserMount is NULL! Laser will not work."), *GetName());
+        }
+    }
+    
     if (HasAuthority())
     {
         CurrentHealth = MaxHealth;

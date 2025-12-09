@@ -3,15 +3,15 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Systems/Interfaces/InteractableInterface.h"
-#include "InteractableChair.generated.h"
+#include "SolaraqInteractableChair.generated.h"
 
 UCLASS()
-class SOLARAQ_API AInteractableChair : public AActor, public IInteractableInterface
+class SOLARAQ_API ASolaraqInteractableChair : public AActor, public IInteractableInterface
 {
 	GENERATED_BODY()
 	
 public:	
-	AInteractableChair();
+	ASolaraqInteractableChair();
 
 	// Getter for the location the character should walk to before sitting
 	FVector GetEntryPointLocation() const;

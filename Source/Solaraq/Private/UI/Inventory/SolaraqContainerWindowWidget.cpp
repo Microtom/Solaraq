@@ -27,6 +27,13 @@ void USolaraqContainerWindowWidget::NativeConstruct()
 		CloseButton->OnClicked.AddDynamic(this, &USolaraqContainerWindowWidget::CloseWindow);
 	}
 
+	// 2. Setup Loot All Button (NEW)
+	if (LootAllButton)
+	{
+		LootAllButton->OnClicked.RemoveDynamic(this, &USolaraqContainerWindowWidget::OnLootAllClicked);
+		LootAllButton->OnClicked.AddDynamic(this, &USolaraqContainerWindowWidget::OnLootAllClicked);
+	}
+
 	// 2. Setup Grid
 	// We do this in NativeConstruct because that's when the widget tree is guaranteed to be accessible.
 	if (ContainerInventory && ContainerGrid)
@@ -70,6 +77,33 @@ void USolaraqContainerWindowWidget::HandleGridDrop(const FPlacedItem& DroppedIte
 	else if (SourceComp)
 	{
 		SourceComp->TransferItemTo(ContainerInventory, DroppedItem.ItemID, TargetCoord);
+	}
+}
+
+void USolaraqContainerWindowWidget::OnLootAllClicked()
+{
+	if (!ContainerInventory) return;
+
+	// 1. Get the Player Pawn
+	APawn* OwningPawn = GetOwningPlayerPawn();
+	if (!OwningPawn)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LootAll failed: No Owning Pawn found."));
+		return;
+	}
+
+	// 2. Find the Player's Inventory Component
+	// Assuming the standard player character has the component
+	UInventoryComponent* PlayerInventory = OwningPawn->FindComponentByClass<UInventoryComponent>();
+    
+	if (PlayerInventory)
+	{
+		// 3. Execute the transfer
+		ContainerInventory->TransferAllItemsTo(PlayerInventory);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("LootAll failed: Player Pawn does not have an InventoryComponent."));
 	}
 }
 

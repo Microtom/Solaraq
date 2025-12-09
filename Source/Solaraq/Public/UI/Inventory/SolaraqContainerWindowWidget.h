@@ -38,12 +38,18 @@ protected:
 	UFUNCTION()
 	void CloseWindow();
 
+	UFUNCTION()
+	void OnLootAllClicked();
+	
 	// UI Elements
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<USolaraqInventoryGridWidget> ContainerGrid;
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> CloseButton;
+
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> LootAllButton;
 
 private:
 	UPROPERTY()

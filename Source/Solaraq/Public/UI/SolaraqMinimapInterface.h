@@ -1,3 +1,4 @@
+// UI/SolaraqMinimapInterface.h
 #pragma once
 
 #include "CoreMinimal.h"
@@ -11,7 +12,7 @@ enum class EMinimapIconType : uint8
 	FriendlyShip,
 	HostileShip,
 	Planet,
-	AsteroidField,
+	AsteroidField, // Use this for the texture look
 	Station,
 	Moon
 };
@@ -27,13 +28,25 @@ struct FSolaraqMinimapData
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FLinearColor IconColor = FLinearColor::White;
 
+	// Use this for fixed icons (Ships, etc.)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float IconScale = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bIsVisible = true;
+
+	// --- NEW: Area Definitions ---
+
+	// If true, the minimap will calculate the size of the icon based on World Radius vs Radar Range
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bIsArea = false;
+
+	// The actual radius in World Units (cm)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	float AreaRadius = 0.0f;
 };
 
+// ... Interface class remains the same ...
 UINTERFACE(MinimalAPI)
 class USolaraqMinimapInterface : public UInterface
 {

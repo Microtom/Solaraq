@@ -162,6 +162,8 @@ protected:
 	TObjectPtr<USceneComponent> MuzzlePoint;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components")
 	TObjectPtr<UCameraComponent> CameraComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Components")
+	TObjectPtr<USceneComponent> MiningLaserMount;
 	
 	// --- MOVEMENT & PHYSICS ---
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Solaraq|Movement", meta = (ForceUnits="cm/s^2 * kg?"))

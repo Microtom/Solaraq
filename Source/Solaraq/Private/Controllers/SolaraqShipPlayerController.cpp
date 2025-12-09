@@ -8,6 +8,7 @@
 #include "InputAction.h"
 #include "UI/SolaraqHUDWidget.h" 
 #include "Components/DockingPadComponent.h"
+#include "DrawDebugHelpers.h" // Ensure this is included at the top
 #include "UI/MiningAimWidgetInterface.h"
 #include "Blueprint/UserWidget.h" // For target markers
 #include "UI/TargetWidgetInterface.h" // For target markers
@@ -258,7 +259,6 @@ void ASolaraqShipPlayerController::CreateHUD()
     }
 }
 
-
 void ASolaraqShipPlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent(); // This calls base and gets EnhancedInputComponentRef
@@ -352,7 +352,7 @@ void ASolaraqShipPlayerController::Tick(float DeltaTime)
     Super::Tick(DeltaTime);
 
     // Update widget positions every frame if lock is active
-    if (bIsHomingLockActive) // No need to check control mode, this PC IS the ship controller
+    if (bIsHomingLockActive) 
     {
         UpdateTargetWidgets();
     }
@@ -365,22 +365,55 @@ void ASolaraqShipPlayerController::Tick(float DeltaTime)
         
         if (MiningLaser)
         {
+            // --- DEBUG LOGGING SETUP ---
+            static float LastInputLogTime = 0.0f;
+            float CurrentTime = GetWorld()->GetTimeSeconds();
+            bool bShouldLog = (CurrentTime - LastInputLogTime > 0.5f); // Reduced freq to 2Hz
+
+            // 1. Process Input
             if (!FMath::IsNearlyZero(LastAimLaserInputValue.X) || !FMath::IsNearlyZero(LastAimLaserInputValue.Y))
             {
+                if (bShouldLog)
+                {
+                    UE_LOG(LogSolaraqMining, Verbose, TEXT("ShipPC: Aim Input Value: X=%.2f, Y=%.2f"), LastAimLaserInputValue.X, LastAimLaserInputValue.Y);
+                }
+
                 if (!FMath::IsNearlyZero(LastAimLaserInputValue.X))
                 {
                     float DeltaYaw = FMath::Sign(LastAimLaserInputValue.X) * LaserRelativeAimRateDegreesPerSecond * DeltaTime;
+                    
                     CurrentLaserRelativeAimYaw = FMath::Clamp(CurrentLaserRelativeAimYaw + DeltaYaw, -MaxLaserRelativeYawDegrees, MaxLaserRelativeYawDegrees);
+                    
+                    if (bShouldLog)
+                    {
+                        UE_LOG(LogSolaraqMining, Verbose, TEXT("ShipPC: Yaw Update. New Relative Yaw=%.2f"), CurrentLaserRelativeAimYaw);
+                    }
                 }
             }
 
+            // 2. Calculate Target Location
             FVector ShipLocation = ControlledShip->GetActorLocation();
             FRotator ShipRotation = ControlledShip->GetActorRotation(); 
             FVector ShipForward = ShipRotation.Vector(); 
-            FVector RelativeAimDirection = UKismetMathLibrary::RotateAngleAxis(ShipForward, CurrentLaserRelativeAimYaw, ControlledShip->GetActorUpVector());
+            FVector ShipUp = ControlledShip->GetActorUpVector();
+
+            // Rotate ship forward by the relative yaw around the ship's UP vector
+            FVector RelativeAimDirection = UKismetMathLibrary::RotateAngleAxis(ShipForward, CurrentLaserRelativeAimYaw, ShipUp);
             FVector NewTargetLocation = ShipLocation + RelativeAimDirection.GetSafeNormal() * MiningLaser->MaxRange;
+            
+            // Set target on the component
             MiningLaser->SetTargetWorldLocation(NewTargetLocation);
 
+            // --- DEBUG VISUALS (GREEN LINE) ---
+            // Draw a line from the ship to where the controller thinks we are aiming
+            DrawDebugLine(GetWorld(), ShipLocation, NewTargetLocation, FColor::Green, false, -1.0f, 0, 2.0f);
+            
+            if (bShouldLog)
+            {
+                UE_LOG(LogSolaraqMining, Verbose, TEXT("ShipPC: Calc Target. RelYaw: %.2f, AimDir: %s"), 
+                    CurrentLaserRelativeAimYaw, *RelativeAimDirection.ToString());
+                LastInputLogTime = CurrentTime;
+            }
 
             // Manage the aiming widget
             if (MiningLaser->IsLaserActive())
@@ -392,9 +425,7 @@ void ASolaraqShipPlayerController::Tick(float DeltaTime)
                     {
                         ActiveMiningAimIndicatorWidget->AddToViewport();
                         ActiveMiningAimIndicatorWidget->SetVisibility(ESlateVisibility::Collapsed); 
-                        UE_LOG(LogTemp, Log, TEXT("ShipPC: Created MiningAimIndicatorWidget."));
-                        // Ensure the widget's alignment is set to center if you want the offset to work from its center
-                        // ActiveMiningAimIndicatorWidget->SetAlignmentInViewport(FVector2D(0.5f, 0.5f)); // Optional, depends on widget design
+                        UE_LOG(LogSolaraqMining, Log, TEXT("ShipPC: Created MiningAimIndicatorWidget."));
                     }
                 }
 
@@ -411,27 +442,23 @@ void ASolaraqShipPlayerController::Tick(float DeltaTime)
                         if (UGameplayStatics::ProjectWorldToScreen(this, CurrentLaserTargetWorld, TargetScreenPosition, false))
                         {
                             FVector2D AimDirectionOnScreen = (TargetScreenPosition - MuzzleScreenPosition);
-                            if (AimDirectionOnScreen.IsNearlyZero()) // If target is right on top of muzzle on screen
+                            if (AimDirectionOnScreen.IsNearlyZero()) 
                             {
-                                // Default to pointing "up" or "forward" on screen relative to how your arrow is designed
-                                // For example, if arrow points up, use FVector2D(0, -1)
-                                // Or, get the ship's forward projected to screen if possible (more complex)
-                                // For now, let's make it point towards where the target *would* be if slightly offset
                                 FVector SlightlyForwardFromMuzzle = MuzzleLocation + MiningLaser->GetLaserMuzzleForwardVector() * 100.0f;
                                 FVector2D ForwardScreenPos;
                                 if (UGameplayStatics::ProjectWorldToScreen(this, SlightlyForwardFromMuzzle, ForwardScreenPos, false))
                                 {
                                     AimDirectionOnScreen = (ForwardScreenPos - MuzzleScreenPosition);
                                 } else {
-                                    AimDirectionOnScreen = FVector2D(0, -1); // Fallback: screen up
+                                    AimDirectionOnScreen = FVector2D(0, -1); 
                                 }
                             }
-                            AimDirectionOnScreen.Normalize(); // We only need the direction
+                            AimDirectionOnScreen.Normalize(); 
 
-                            const float ScreenOffsetDistance = 50.0f; // Adjust this value to your liking (pixels)
+                            const float ScreenOffsetDistance = 50.0f; 
                             FVector2D WidgetScreenPosition = MuzzleScreenPosition + AimDirectionOnScreen * ScreenOffsetDistance;
 
-                            ActiveMiningAimIndicatorWidget->SetPositionInViewport(WidgetScreenPosition, true); // Use true to remove DPI scale for pixel-perfect
+                            ActiveMiningAimIndicatorWidget->SetPositionInViewport(WidgetScreenPosition, true); 
                             ActiveMiningAimIndicatorWidget->SetVisibility(ESlateVisibility::HitTestInvisible);
 
                             float AngleDegrees = FMath::RadiansToDegrees(FMath::Atan2(AimDirectionOnScreen.Y, AimDirectionOnScreen.X));
@@ -445,16 +472,16 @@ void ASolaraqShipPlayerController::Tick(float DeltaTime)
                                 ActiveMiningAimIndicatorWidget->SetRenderTransformAngle(AngleDegrees);
                                 if (MiningAimIndicatorWidgetClass)
                                 {
-                                    UE_LOG(LogTemp, Warning, TEXT("ShipPC: MiningAimIndicatorWidgetClass '%s' does not implement IMiningAimWidgetInterface. Rotating root widget as fallback."), *MiningAimIndicatorWidgetClass->GetName());
+                                    UE_LOG(LogSolaraqMining, Warning, TEXT("ShipPC: MiningAimIndicatorWidgetClass '%s' does not implement IMiningAimWidgetInterface."), *MiningAimIndicatorWidgetClass->GetName());
                                 }
                             }
                         }
-                        else // Target not on screen, but muzzle is. Hide widget or point towards edge. For now, hide.
+                        else 
                         {
                              ActiveMiningAimIndicatorWidget->SetVisibility(ESlateVisibility::Collapsed);
                         }
                     }
-                    else // Muzzle not on screen
+                    else 
                     {
                         ActiveMiningAimIndicatorWidget->SetVisibility(ESlateVisibility::Collapsed);
                     }
@@ -466,7 +493,7 @@ void ASolaraqShipPlayerController::Tick(float DeltaTime)
                 {
                     ActiveMiningAimIndicatorWidget->RemoveFromParent();
                     ActiveMiningAimIndicatorWidget = nullptr;
-                    UE_LOG(LogTemp, Log, TEXT("ShipPC: Removed MiningAimIndicatorWidget (laser inactive)."));
+                    UE_LOG(LogSolaraqMining, Log, TEXT("ShipPC: Removed MiningAimIndicatorWidget (laser inactive)."));
                 }
             }
         }
@@ -672,11 +699,11 @@ void ASolaraqShipPlayerController::HandleFireMiningLaserStarted(const FInputActi
         if (MiningLaser)
         {
             MiningLaser->ActivateLaser(true);
-            UE_LOG(LogTemp, Log, TEXT("ShipPC: Mining Laser STARTED by input."));
+            UE_LOG(LogSolaraqMining, Log, TEXT("ShipPC: Mining Laser STARTED by input."));
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("ShipPC: FireMiningLaserAction STARTED, but controlled ship '%s' has no MiningLaserComponent."), *ControlledShip->GetName());
+            UE_LOG(LogSolaraqMining, Warning, TEXT("ShipPC: FireMiningLaserAction STARTED, but ship '%s' has no MiningLaserComponent."), *ControlledShip->GetName());
         }
     }
 }
@@ -690,11 +717,11 @@ void ASolaraqShipPlayerController::HandleFireMiningLaserCompleted(const FInputAc
         if (MiningLaser)
         {
             MiningLaser->ActivateLaser(false);
-            UE_LOG(LogTemp, Log, TEXT("ShipPC: Mining Laser COMPLETED/STOPPED by input."));
+            UE_LOG(LogSolaraqMining, Log, TEXT("ShipPC: Mining Laser STOPPED by input."));
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("ShipPC: FireMiningLaserAction COMPLETED, but controlled ship '%s' has no MiningLaserComponent."), *ControlledShip->GetName());
+            UE_LOG(LogSolaraqMining, Warning, TEXT("ShipPC: FireMiningLaserAction STOPPED, but ship '%s' has no MiningLaserComponent."), *ControlledShip->GetName());
         }
     }
 }

@@ -85,6 +85,9 @@ void USolaraqBlueprintLogLibrary::LogToSolaraqChannel(
         case ESolaraqLogCategory::Minimap:
             LogCategoryName = LogSolaraqMinimap.GetCategoryName();
             break;
+    case ESolaraqLogCategory::Mining:
+        LogCategoryName = LogSolaraqMining.GetCategoryName();
+        break;
         // Add cases for new categories here
         default:
             // Fallback to General if an invalid enum value is somehow passed

@@ -17,3 +17,4 @@ DEFINE_LOG_CATEGORY(LogSolaraqTransition);
 DEFINE_LOG_CATEGORY(LogSolaraqShield);
 DEFINE_LOG_CATEGORY(LogSolaraqFishing);
 DEFINE_LOG_CATEGORY(LogSolaraqMinimap);
+DEFINE_LOG_CATEGORY(LogSolaraqMining);

@@ -2,7 +2,6 @@
 #include "Items/ItemPickup.h"
 #include "Items/ItemDataAssetBase.h"
 #include "Items/InventoryComponent.h"
-#include "Pawns/SolaraqCharacterPawn.h" // We need to know about the pawn
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 
@@ -36,27 +35,25 @@ void AItemPickup::BeginPlay()
 
 void AItemPickup::OnSphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-    // Try to cast the overlapping actor to our character pawn
-    ASolaraqCharacterPawn* CharacterPawn = Cast<ASolaraqCharacterPawn>(OtherActor);
-    if (CharacterPawn)
-    {
-        // Get the character's inventory component
-        UInventoryComponent* Inventory = CharacterPawn->GetInventoryComponent();
-        if (Inventory && ItemData)
-        {
-            // Try to add the item to the inventory
-            const int32 UnaddedQuantity = Inventory->AddItem(ItemData, Quantity);
+    if (!OtherActor) return;
 
-            if (UnaddedQuantity == 0)
-            {
-                // If everything was added successfully, destroy this pickup actor
-                Destroy();
-            }
-            else
-            {
-                // If the inventory was full, update our quantity to what's left
-                Quantity = UnaddedQuantity;
-            }
+    // Check if the actor (Ship OR Character) has an inventory
+    UInventoryComponent* Inventory = OtherActor->FindComponentByClass<UInventoryComponent>();
+
+    if (Inventory && ItemData)
+    {
+        // Try to add the item to the inventory
+        const int32 UnaddedQuantity = Inventory->AddItem(ItemData, Quantity);
+
+        if (UnaddedQuantity == 0)
+        {
+            // If everything was added successfully, destroy this pickup actor
+            Destroy();
+        }
+        else
+        {
+            // If the inventory was full, update our quantity to what's left
+            Quantity = UnaddedQuantity;
         }
     }
 }

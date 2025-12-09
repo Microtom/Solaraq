@@ -33,7 +33,7 @@ public:
 	// Update getter if you have one
 	FORCEINLINE USolaraqEquipmentComponent* GetEquipmentComponent() const { return EquipmentComponent; }
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fishing")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Fishing")
 	float FishingCameraRadius = 800.f;
 	
 	FVector GetAimDirection() const;
@@ -64,12 +64,24 @@ public:
 	// Called by the Chair when we are allowed to sit
 	void SitDown(USceneComponent* SeatAnchor);
 
-	// Called when we press interact again, or move away
+	/** The Animation Montage to play when sitting down (Stand -> Sit). */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Interaction")
+	UAnimMontage* SitMontage;
+
+	/** The Animation Montage to play when standing up (Sit -> Stand). */
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Interaction")
+	UAnimMontage* StandUpMontage;
+
+	// Called by the chair when we are close enough to sit
+	void BeginSittingSequence(USceneComponent* EntryPoint, USceneComponent* SeatAnchor);
+
+	// Override StandUp to play animation
 	void StandUp();
 	
 	// Helper to check state for Animation Blueprints
-	UFUNCTION(BlueprintCallable, Category = "State")
+	UFUNCTION(BlueprintCallable, Category = "Solaraq|State")
 	bool IsSitting() const { return bIsSitting; }
+	bool IsSprinting() const { return bIsSprinting; }
 	
 protected:
 	virtual void BeginPlay() override;
@@ -77,10 +89,10 @@ protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// --- Sprinting ---
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sprinting")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Movement|Sprinting")
 	float NormalMaxWalkSpeed;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Movement|Sprinting")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Solaraq|Movement|Sprinting")
 	float SprintMaxWalkSpeed = 800.f;
 
 	UPROPERTY(ReplicatedUsing=OnRep_IsSprinting)
@@ -92,18 +104,18 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void Server_SetSprinting(bool bNewSprintingState);
 	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Camera")
 	TObjectPtr<USpringArmComponent> SpringArmComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Camera")
 	TObjectPtr<UCameraComponent> CameraComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Movement")
 	float AimTurnInterpSpeed = 6.0f;
 	
 
 	// --- Inventory ---
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Solaraq|Inventory")
 	TObjectPtr<UInventoryComponent> InventoryComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera, meta = (AllowPrivateAccess = "true"))
@@ -111,24 +123,41 @@ protected:
 	
  	// (Optional) A small delay once max offset is reached before forced rejoin begins.
  	// If 0, rejoin starts immediately once max offset is hit.
- 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
+ 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Solaraq|Camera|Custom Lag", meta = (EditCondition = "bUseCustomCameraLag"))
  	float DelayBeforeForcedRejoin = 0.25f;
 
 	UPROPERTY(Replicated) // Add to GetLifetimeReplicatedProps if multiplayer
 	bool bIsSitting = false;
 	
+	// --- Sit Alignment Variables ---
+	bool bIsAligningForSit = false;
+	FVector AlignStartLoc;
+	FRotator AlignStartRot;
+	FTransform AlignTargetTransform;
+	float AlignAlpha = 0.0f;
+    
+	UPROPERTY()
+	USceneComponent* PendingSeatAnchor; // Where we attach AFTER the montage ends
+
+	UFUNCTION()
+	void OnSitMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+    
+	UFUNCTION()
+	void OnStandUpMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 	
 private:
 	// --- Smooth Sitting Variables ---
 	bool bIsSittingDownTransition = false;
-	FVector SitStartLocation;
-	FQuat SitStartRotation;
+	// Changed from World Space to Relative Space storage
+	FVector StartRelativeLocation;
+	FRotator StartRelativeRotation;
     
 	// We store the pointer to the component we want to end up at
 	UPROPERTY()
 	USceneComponent* TargetSeatComponent;
 
 	float SitTransitionAlpha = 0.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "Solaraq|Interaction")
 	float SitTransitionDuration = 1.0f; // Takes 1 second to sit (matches anim length)
 	
 public:

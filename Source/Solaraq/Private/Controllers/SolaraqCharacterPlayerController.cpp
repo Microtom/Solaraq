@@ -65,10 +65,17 @@ void ASolaraqCharacterPlayerController::HideFishingHUD()
     }
 }
 
-void ASolaraqCharacterPlayerController::RequestMoveToInteract(AActor* TargetActor, FVector TargetLocation,
-    float AcceptanceRadius)
+void ASolaraqCharacterPlayerController::RequestMoveToInteract(AActor* TargetActor, FVector TargetLocation, float AcceptanceRadius)
 {
     if (!TargetActor) return;
+
+    // --- FIX: SPAM PREVENTION ---
+    // If we are already navigating to THIS actor, and we are still moving, do NOT reset pathfinding.
+    // This stops the log spam and stops the character from stuttering.
+    if (bIsAutoNavigatingToInteract && PendingInteractableActor == TargetActor)
+    {
+        return; 
+    }
 
     PendingInteractableActor = TargetActor;
     PendingInteractionLocation = TargetLocation;
@@ -77,7 +84,6 @@ void ASolaraqCharacterPlayerController::RequestMoveToInteract(AActor* TargetActo
 
     UE_LOG(LogSolaraqSystem, Log, TEXT("RequestMoveToInteract: Moving to %s with Radius %.2f"), *TargetLocation.ToString(), AcceptanceRadius);
 
-    // Call MoveTo ONLY ONCE here. Do not spam it in Tick.
     UAIBlueprintHelperLibrary::SimpleMoveToLocation(this, PendingInteractionLocation);
 }
 
@@ -402,49 +408,58 @@ void ASolaraqCharacterPlayerController::Tick(float DeltaTime)
         float DistSq = FVector::DistSquared(CurrentLoc, PendingInteractionLocation);
         float RadiusSq = PendingInteractionRadius * PendingInteractionRadius;
 
-        // Check if we arrived
-        if (DistSq <= RadiusSq)
+        // DEBUG LOGGING (Optional: Throttled)
+        static float LogTimer = 0.0f;
+        LogTimer += DeltaTime;
+        if (LogTimer > 1.0f) 
         {
-            // 1. Stop Moving
+            LogTimer = 0.0f;
+            // UE_LOG(LogTemp, Log, TEXT("[AutoNav] Distance: %.2f | Required: %.2f"), FMath::Sqrt(DistSq), PendingInteractionRadius);
+        }
+
+        // Check if we arrived OR if we are very close but stopped moving (stuck against the chair)
+        bool bArrived = (DistSq <= RadiusSq);
+        
+        // Stuck Check: If we are close (within 1.5x radius) and velocity is near zero, assume we arrived.
+        if (!bArrived && DistSq < (RadiusSq * 2.25f) && GetControlledCharacter()->GetVelocity().SizeSquared() < 10.0f)
+        {
+            // Force arrival if we are stuck near the target
+            bArrived = true;
+        }
+
+        if (bArrived)
+        {
             StopMovement();
             bIsAutoNavigatingToInteract = false;
 
-            // 2. Trigger the Interface again
             if (PendingInteractableActor->Implements<UInteractableInterface>())
             {
-                UE_LOG(LogSolaraqSystem, Log, TEXT("Auto-Nav complete. Triggering Interact on %s"), *PendingInteractableActor->GetName());
+                // Force interact now that we are here
                 IInteractableInterface::Execute_Interact(PendingInteractableActor, GetControlledCharacter());
             }
 
-            // 3. Clear pointer
             PendingInteractableActor = nullptr;
-        }
-        else
-        {
-            // If we are still moving, we don't spam SimpleMoveToLocation.
-            // But we should check if we got stuck.
-            if (CharPawn && CharPawn->GetVelocity().SizeSquared() < 1.0f)
-            {
-                // Optional: We are trying to move but velocity is near zero. 
-                // We might be blocked by the object itself (Radius too small) or geometry.
-                // Simple workaround: re-issue move occasionally or abort after timeout.
-                // For now, we trust SimpleMoveToLocation to navigate around or stop.
-                
-                // If we are very close but blocked, we might want to just trigger interaction anyway if within a reasonable 'reach' distance (e.g. 200 units)
-                if (DistSq < (200.0f * 200.0f))
-                {
-                     // Force success if we are kinda close but stuck
-                     // StopMovement(); 
-                     // bIsAutoNavigatingToInteract = false;
-                     // ... trigger interact ...
-                }
-            }
         }
     }
 }
 
 void ASolaraqCharacterPlayerController::HandleCharacterMoveInput(const FInputActionValue& Value)
 {
+    ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
+    if (!CharPawn) return;
+
+    // --- NEW LOGIC START ---
+    // If we are sitting, movement keys act as the "Stand Up" trigger
+    if (CharPawn->IsSitting())
+    {
+        // Only trigger stand up if the input is significant
+        if (Value.Get<FVector2D>().SizeSquared() > 0.1f)
+        {
+            CharPawn->StandUp();
+        }
+        return; // Consume input so we don't slide while standing up
+    }
+    
     // If player touches WASD, cancel the auto-interaction
     if (bIsAutoNavigatingToInteract)
     {
@@ -464,28 +479,41 @@ void ASolaraqCharacterPlayerController::HandleCharacterMoveInput(const FInputAct
     }
     
     // Pass input to pawn
-    ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
-    if (CharPawn)
-    {
-        const FVector2D MovementVector = Value.Get<FVector2D>();
-        CharPawn->HandleMoveInput(MovementVector);
-    }
+    
+    const FVector2D MovementVector = Value.Get<FVector2D>();
+    CharPawn->HandleMoveInput(MovementVector);
+    
 }
 
 void ASolaraqCharacterPlayerController::HandlePointerMove(const FInputActionValue& Value)
 {
-    // If we click, we cancel previous auto-nav
-    if (bIsAutoNavigatingToInteract)
+    ASolaraqCharacterPawn* CharPawn = GetControlledCharacter();
+    
+    // 1. If Sitting -> Stand Up
+    if (CharPawn && CharPawn->IsSitting())
     {
-        bIsAutoNavigatingToInteract = false;
-        PendingInteractableActor = nullptr;
+        CharPawn->StandUp();
+        return; 
     }
-
+    
     FHitResult Hit;
     if (GetHitResultUnderCursor(ECC_Visibility, false, Hit))
     {
         if (Hit.bBlockingHit && Hit.GetActor())
         {
+            // --- FIX START: SMART CANCELLATION ---
+            // Only cancel previous Auto-Nav if we clicked on something NEW.
+            // If we are holding the mouse on the SAME chair we are walking to, don't interrupt!
+            bool bIsSameActor = (PendingInteractableActor == Hit.GetActor());
+            
+            if (bIsAutoNavigatingToInteract && !bIsSameActor)
+            {
+                // We clicked somewhere else (Ground or new item), so cancel the old path.
+                bIsAutoNavigatingToInteract = false;
+                PendingInteractableActor = nullptr;
+            }
+            // --- FIX END ---
+
             // 1. Interactable Actor
             if (Hit.GetActor()->Implements<UInteractableInterface>())
             {
@@ -495,6 +523,10 @@ void ASolaraqCharacterPlayerController::HandlePointerMove(const FInputActionValu
             // 2. Ground
             else
             {
+                // We clicked the ground, so definitely cancel any object interaction
+                bIsAutoNavigatingToInteract = false;
+                PendingInteractableActor = nullptr;
+                
                 MoveToDestination(Hit.Location);
             }
         }

@@ -14,6 +14,7 @@
 #include "NiagaraSystem.h"
 #include "Damage/MiningDamageType.h" // Our custom damage type
 #include "Components/SceneComponent.h"
+#include "Logging/SolaraqLogChannels.h"
 // #include "Logging/SolaraqLogChannels.h"
 
 UMiningLaserComponent::UMiningLaserComponent() :
@@ -36,22 +37,14 @@ UMiningLaserComponent::UMiningLaserComponent() :
     bCurrentlyHittingTarget(false)
 {
     PrimaryComponentTick.bCanEverTick = true;
-   PrimaryComponentTick.bStartWithTickEnabled = true; // Always tick to allow aiming/tracing even if effects are off
-
-    // Ensure MiningDamageTypeClass is set to something valid by default in BP
-    // For C++, you might load it:
-    // static ConstructorHelpers::FClassFinder<UMiningDamageType> MiningDamageTypeClassFinder(TEXT("/Game/Blueprints/DamageTypes/DT_Mining")); // Adjust path
-    // if (MiningDamageTypeClassFinder.Succeeded())
-    // {
-    //     MiningDamageTypeClass = MiningDamageTypeClassFinder.Class;
-    // }
+    PrimaryComponentTick.bStartWithTickEnabled = true; // Always tick to allow aiming/tracing even if effects are off
+    MiningDamageTypeClass = UMiningDamageType::StaticClass();
 }
 
 void UMiningLaserComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Attempt to find and set the LaserMuzzleComponent
     AActor* Owner = GetOwner();
     if (Owner)
     {
@@ -59,23 +52,23 @@ void UMiningLaserComponent::BeginPlay()
         if (LaserMuzzleComponentName != NAME_None)
         {
             TArray<USceneComponent*> SceneComponents;
-            Owner->GetComponents<USceneComponent>(SceneComponents); // Get all scene components on the owner
+            Owner->GetComponents<USceneComponent>(SceneComponents); 
             for (USceneComponent* SceneComp : SceneComponents)
             {
                 if (SceneComp && SceneComp->GetFName() == LaserMuzzleComponentName)
                 {
                     SetLaserMuzzleComponent(SceneComp);
-                    UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent '%s': Found and set LaserMuzzleComponent by name: '%s'"), *GetName(), *LaserMuzzleComponentName.ToString());
+                    UE_LOG(LogSolaraqMining, Log, TEXT("MiningLaserComponent: Found and set LaserMuzzleComponent by name: '%s'"), *LaserMuzzleComponentName.ToString());
                     break;
                 }
             }
             if (!LaserMuzzleComponent)
             {
-                UE_LOG(LogTemp, Warning, TEXT("MiningLaserComponent '%s': LaserMuzzleComponentName '%s' was specified, but no component with that name was found on owner '%s'."), *GetName(), *LaserMuzzleComponentName.ToString(), *Owner->GetName());
+                UE_LOG(LogSolaraqMining, Warning, TEXT("MiningLaserComponent: LaserMuzzleComponentName '%s' specified but not found."), *LaserMuzzleComponentName.ToString());
             }
         }
 
-        // Priority 2: If not found by name, try to find by socket (if LaserMuzzleComponent is still null)
+        // Priority 2: If not found by name, try to find by socket 
         if (!LaserMuzzleComponent && !BeamSourceSocketName.IsNone())
         {
             TArray<UStaticMeshComponent*> MeshComponents;
@@ -90,46 +83,48 @@ void UMiningLaserComponent::BeginPlay()
                         SocketSceneComp->AttachToComponent(MeshComp, FAttachmentTransformRules::KeepRelativeTransform, BeamSourceSocketName);
                         SocketSceneComp->RegisterComponent();
                         SetLaserMuzzleComponent(SocketSceneComp);
-                        UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent '%s': Attached muzzle to socket '%s' on '%s'"), *GetName(),*BeamSourceSocketName.ToString(), *MeshComp->GetName());
+                        UE_LOG(LogSolaraqMining, Log, TEXT("MiningLaserComponent: Attached muzzle to socket '%s'."), *BeamSourceSocketName.ToString());
                         break;
                     }
                 }
             }
-            if (!LaserMuzzleComponent)
-            {
-                 UE_LOG(LogTemp, Warning, TEXT("MiningLaserComponent '%s': BeamSourceSocketName '%s' specified but not found on any StaticMeshComponent of owner '%s'."), *GetName(), *BeamSourceSocketName.ToString(), *Owner->GetName());
-            }
         }
 
-        // Priority 3: If still no muzzle, default to owner's root component (if LaserMuzzleComponent is still null)
+        // --- NEW PRIORITY 3: Auto-detect the standard C++ Mount ---
         if (!LaserMuzzleComponent)
         {
-            if (Owner->GetRootComponent())
+            TArray<USceneComponent*> SceneComponents;
+            Owner->GetComponents<USceneComponent>(SceneComponents);
+            for (USceneComponent* SceneComp : SceneComponents)
             {
-                SetLaserMuzzleComponent(Owner->GetRootComponent());
-                UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent '%s': Defaulted muzzle to owner's root component: '%s'"), *GetName(), *Owner->GetRootComponent()->GetName());
+                // Check specifically for the component name created in SolaraqShipBase constructor
+                if (SceneComp && SceneComp->GetFName() == FName("MiningLaserMount"))
+                {
+                    SetLaserMuzzleComponent(SceneComp);
+                    UE_LOG(LogSolaraqMining, Log, TEXT("MiningLaserComponent: Auto-detected standard 'MiningLaserMount'."));
+                    break;
+                }
             }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("MiningLaserComponent '%s': Owner '%s' has no RootComponent. Cannot set a default LaserMuzzleComponent."), *GetName(), *Owner->GetName());
-            }
+        }
+        // -----------------------------------------------------------
+
+        // Priority 4: Final Failure Check
+        if (!LaserMuzzleComponent)
+        {
+            UE_LOG(LogSolaraqMining, Error, TEXT("MiningLaserComponent '%s': No Muzzle found! Please create a SceneComponent named 'MiningLaserMount' on the ship."), *GetName());
+            // This disables the logic, which is why your laser wasn't moving or hitting anything
+            SetComponentTickEnabled(false); 
+            return;
         }
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("MiningLaserComponent '%s' has no owner at BeginPlay!"), *GetName());
+        UE_LOG(LogSolaraqMining, Error, TEXT("MiningLaserComponent '%s' has no owner at BeginPlay!"), *GetName());
     }
-
 
     if (!MiningDamageTypeClass)
     {
-        UE_LOG(LogTemp, Error, TEXT("MiningLaserComponent '%s': MiningDamageTypeClass is not set! Mining will not apply damage correctly."), *GetName());
-    }
-
-    if (!LaserMuzzleComponent)
-    {
-        UE_LOG(LogTemp, Error, TEXT("MiningLaserComponent '%s': CRITICAL - LaserMuzzleComponent could not be resolved. Laser will not function correctly."), *GetName());
-        SetComponentTickEnabled(false); // Disable tick if we can't get a muzzle
+        UE_LOG(LogSolaraqMining, Error, TEXT("MiningLaserComponent '%s': MiningDamageTypeClass is not set!"), *GetName());
     }
 }
 
@@ -192,30 +187,26 @@ FVector UMiningLaserComponent::GetLaserMuzzleForwardVector() const
     return FVector::ForwardVector;
 }
 
-
 void UMiningLaserComponent::ActivateLaser(bool bNewActiveState)
 {
     if (bLaserIsActive == bNewActiveState)
     {
-        return; // No change
+        return; 
     }
 
     bLaserIsActive = bNewActiveState;
-   // ComponentTickEnabled is now true by default, this line is not strictly needed unless you want to disable tick when laser is off for other reasons.
-   // For now, let's keep it ticking so aiming can update even if effects are briefly off.
-   // SetComponentTickEnabled(bLaserIsActive || SomeOtherReasonToTick); 
 
     if (bLaserIsActive)
     {
-        StartLaserEffects(); // Starts beam/impact effects
+        StartLaserEffects(); 
         if (GetOwner() && LaserMuzzleComponent) CurrentTargetWorldLocation = GetLaserMuzzleLocation() + GetLaserMuzzleForwardVector() * MaxRange * 0.5f;
     }
-    else // Deactivating laser
+    else 
     {
-        StopLaserEffects(); // Stops beam/impact effects
+        StopLaserEffects(); 
 
     }
-    UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent: Laser Active State: %d"), bLaserIsActive);
+    UE_LOG(LogSolaraqMining, Log, TEXT("MiningLaserComponent: Laser Active State: %d"), bLaserIsActive);
 }
 
 void UMiningLaserComponent::SetTargetWorldLocation(const FVector& NewTargetLocation)
@@ -231,83 +222,44 @@ void UMiningLaserComponent::StartLaserEffects()
     ActiveBeamCascadePSC = nullptr;
     ActiveBeamNiagaraComp = nullptr;
 
-    if (BeamParticleSystem) // This is UParticleSystem*, which can be Cascade or Niagara
+    if (BeamParticleSystem) 
     {
-        USceneComponent* ActualMuzzleComponent = LaserMuzzleComponent.Get(); // Get raw pointer
+        USceneComponent* ActualMuzzleComponent = LaserMuzzleComponent.Get();
         USceneComponent* AttachParent = ActualMuzzleComponent ? ActualMuzzleComponent : (GetOwner() ? GetOwner()->GetRootComponent() : nullptr);
         FName AttachSocket = BeamSourceSocketName.IsNone() && LaserMuzzleComponent ? NAME_None : BeamSourceSocketName;
 
-        if (!AttachParent) // Add a guard if GetOwner()->GetRootComponent() could also be null
+        if (!AttachParent) 
         {
-            UE_LOG(LogTemp, Error, TEXT("MiningLaserComponent: AttachParent is NULL in StartLaserEffects. Cannot spawn beam."));
+            UE_LOG(LogSolaraqMining, Error, TEXT("MiningLaserComponent: AttachParent is NULL in StartLaserEffects."));
             return;
         }
         
         if (UNiagaraSystem* NiagaraSystem = Cast<UNiagaraSystem>(BeamParticleSystem))
         {
             ActiveBeamNiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAttached(
-                NiagaraSystem,                      // SystemTemplate
-                AttachParent,                       // AttachToComponent
-                AttachSocket,                       // AttachPointName
-                FVector::ZeroVector,                // Location (relative to attach point)
-                FRotator::ZeroRotator,              // Rotation (relative to attach point)
-                FVector::OneVector,                 // Scale (use OneVector for default 1,1,1 scale)
-                EAttachLocation::KeepRelativeOffset,// LocationType
-                true,                               // bAutoDestroy
-                ENCPoolMethod::None,                // PoolingMethod
-                true,                               // bAutoActivate (System activates immediately)
-                true                                // bPreCullCheck (Typically true, allows system to be culled if off screen before first tick)
+                NiagaraSystem, AttachParent, AttachSocket, FVector::ZeroVector, FRotator::ZeroRotator, FVector::OneVector,
+                EAttachLocation::KeepRelativeOffset, true, ENCPoolMethod::None, true, true
             );
-            UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent: Niagara Beam spawned: %s"), ActiveBeamNiagaraComp ? TEXT("Success") : TEXT("Failed"));
+            UE_LOG(LogSolaraqMining, Verbose, TEXT("MiningLaserComponent: Niagara Beam spawned."));
         }
-        else if (UParticleSystem* CascadeSystem = Cast<UParticleSystem>(BeamParticleSystem)) // It's a Cascade UParticleSystem
+        else if (UParticleSystem* CascadeSystem = Cast<UParticleSystem>(BeamParticleSystem)) 
         {
             ActiveBeamCascadePSC = UGameplayStatics::SpawnEmitterAttached(
-                CascadeSystem, // Use the casted CascadeSystem here
-                AttachParent,
-                AttachSocket,
-                FVector::ZeroVector,
-                FRotator::ZeroRotator,
-                EAttachLocation::KeepRelativeOffset,
-                true
+                CascadeSystem, AttachParent, AttachSocket, FVector::ZeroVector, FRotator::ZeroRotator, EAttachLocation::KeepRelativeOffset, true
             );
-            UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent: Cascade Beam PSC spawned: %s"), ActiveBeamCascadePSC ? TEXT("Success") : TEXT("Failed"));
+            UE_LOG(LogSolaraqMining, Verbose, TEXT("MiningLaserComponent: Cascade Beam PSC spawned."));
         }
     }
 
     if (ActiveLaserSound && !ActiveLaserAudioComponent)
     {
-        // Similar explicit resolution for audio component attachment
-        USceneComponent* AudioAttachToComponent = nullptr;
-        if (LaserMuzzleComponent)
-        {
-            AudioAttachToComponent = LaserMuzzleComponent.Get();
-        }
-        else if (GetOwner())
-        {
-            AudioAttachToComponent = GetOwner()->GetRootComponent();
-        }
-        
+        USceneComponent* AudioAttachToComponent = LaserMuzzleComponent ? LaserMuzzleComponent.Get() : (GetOwner() ? GetOwner()->GetRootComponent() : nullptr);
         if (AudioAttachToComponent)
         {
             ActiveLaserAudioComponent = UGameplayStatics::SpawnSoundAttached(
-                ActiveLaserSound,
-                AudioAttachToComponent, // Use the resolved raw pointer
-                NAME_None, // Sounds usually don't need a sub-socket if attached to the muzzle itself
-                FVector::ZeroVector,
-                EAttachLocation::KeepRelativeOffset,
-                true
+                ActiveLaserSound, AudioAttachToComponent, NAME_None, FVector::ZeroVector, EAttachLocation::KeepRelativeOffset, true
             );
-            if (ActiveLaserAudioComponent)
-            {
-                ActiveLaserAudioComponent->Play();
-                // UE_LOG(LogSolaraq, Log, TEXT("MiningLaserComponent: Laser sound started."));
-            }
-        }
-        else
-        {
-            // UE_LOG(LogSolaraq, Error, TEXT("MiningLaserComponent: Cannot spawn laser sound, no valid attachment point."));
-            UE_LOG(LogTemp, Error, TEXT("MiningLaserComponent: Cannot spawn laser sound, no valid attachment point."));
+            if (ActiveLaserAudioComponent) ActiveLaserAudioComponent->Play();
         }
     }
 }
@@ -323,7 +275,7 @@ void UMiningLaserComponent::StopLaserEffects(bool bImmediate)
     if (ActiveBeamNiagaraComp)
     {
         ActiveBeamNiagaraComp->Deactivate();
-        if (bImmediate) ActiveBeamNiagaraComp->DestroyComponent(); // Niagara components also auto-destroy but can be forced
+        if (bImmediate) ActiveBeamNiagaraComp->DestroyComponent(); 
         ActiveBeamNiagaraComp = nullptr;
     }
 
@@ -344,48 +296,66 @@ void UMiningLaserComponent::StopLaserEffects(bool bImmediate)
     if (ActiveLaserAudioComponent)
     {
         ActiveLaserAudioComponent->Stop();
-        ActiveLaserAudioComponent->DestroyComponent(); // Or fade out if desired
+        ActiveLaserAudioComponent->DestroyComponent(); 
         ActiveLaserAudioComponent = nullptr;
-        // UE_LOG(LogSolaraq, Log, TEXT("MiningLaserComponent: Laser sound stopped."));
     }
 }
 
 void UMiningLaserComponent::UpdateLaserAim(float DeltaTime)
 {
-    if (!LaserMuzzleComponent) return;
+    if (!LaserMuzzleComponent)
+    {
+        static float LastErrorLog = 0.0f;
+        float Now = GetWorld()->GetTimeSeconds();
+        if(Now - LastErrorLog > 2.0f) 
+        {
+            UE_LOG(LogSolaraqMining, Error, TEXT("UpdateLaserAim Failed: LaserMuzzleComponent is NULL!"));
+            LastErrorLog = Now;
+        }
+        return;
+    }
 
-    const FVector MuzzleLocation = GetLaserMuzzleLocation();
-    const FRotator CurrentMuzzleRotation = GetLaserMuzzleRotation();
+    const FVector MuzzleLocation = LaserMuzzleComponent->GetComponentLocation();
+    const FRotator CurrentMuzzleRotation = LaserMuzzleComponent->GetComponentRotation();
     
+    // Debugging Variables
+    static float LastAimLogTime = 0.0f;
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    bool bShouldLog = (CurrentTime - LastAimLogTime > 0.5f);
+
     FVector DirectionToTarget = (CurrentTargetWorldLocation - MuzzleLocation).GetSafeNormal();
-    if (DirectionToTarget.IsNearlyZero()) // Avoid issues if target is at muzzle
+    
+    if (DirectionToTarget.IsNearlyZero()) 
     {
         DirectionToTarget = LaserMuzzleComponent->GetForwardVector();
+        if (bShouldLog) UE_LOG(LogSolaraqMining, Warning, TEXT("UpdateLaserAim: Target is at Muzzle location! Using Forward."));
     }
+
     FRotator TargetMuzzleRotation = DirectionToTarget.Rotation();
 
-    // Clamp rotation if attached to something that rotates itself (e.g. a turret base for the laser)
-    // If LaserMuzzleComponent is directly on the ship and the ship rotates, this is fine.
-    // If LaserMuzzleComponent is a child that should rotate independently:
     FRotator NewMuzzleRotation = FMath::RInterpTo(CurrentMuzzleRotation, TargetMuzzleRotation, DeltaTime, MaxTurnRateDegreesPerSecond);
     
-    // If the laser muzzle is a child component that we want to rotate independently of its parent (the ship itself)
-    // We need to set its World Rotation. If it's the root or just a socket, the owner handles rotation.
-    // This assumes LaserMuzzleComponent is something we can directly rotate, like a dedicated SceneComponent for the laser.
     LaserMuzzleComponent->SetWorldRotation(NewMuzzleRotation);
-}
 
+    if (bShouldLog)
+    {
+        UE_LOG(LogSolaraqMining, Verbose, TEXT("UpdateLaserAim: CurRot: %s -> TargetRot: %s"), 
+            *CurrentMuzzleRotation.ToString(), *TargetMuzzleRotation.ToString());
+        LastAimLogTime = CurrentTime;
+    }
+
+    // VISUAL DEBUG
+    FVector CurrentForward = LaserMuzzleComponent->GetForwardVector();
+    DrawDebugLine(GetWorld(), MuzzleLocation, MuzzleLocation + CurrentForward * 1000.0f, FColor::Red, false, -1.0f, 0, 3.0f);
+    DrawDebugLine(GetWorld(), MuzzleLocation, MuzzleLocation + DirectionToTarget * 1000.0f, FColor::Blue, false, -1.0f, 0, 1.0f);
+}
 
 void UMiningLaserComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     
-   // We still want to update aim even if the laser effects are not active,
-   // so the player controller can get the correct target for its widget.
-   // Effects themselves (beam, sound, damage) are only applied if bLaserIsActive is true.
    if (!GetOwner() || !GetWorld() || !LaserMuzzleComponent)
     {
-        // Check both types of beam and impact effects
         if (ActiveBeamCascadePSC || ActiveBeamNiagaraComp || ActiveImpactCascadePSC || ActiveImpactNiagaraComp)
         {
             StopLaserEffects(true); 
@@ -393,55 +363,70 @@ void UMiningLaserComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         return;
     }
    
-    // 1. Update Laser Aim (rotate the LaserMuzzleComponent towards CurrentTargetWorldLocation)
+    // 1. Update Laser Aim
     UpdateLaserAim(DeltaTime);
 
-   // Only do trace, damage, and visual effects if the laser is actually active
    if (bLaserIsActive)
    {
        // 2. Perform Line Trace
        FHitResult HitResult;
        FVector TraceStart = GetLaserMuzzleLocation();
        FVector TraceEnd = TraceStart + GetLaserMuzzleForwardVector() * MaxRange;
-       CurrentImpactPoint = TraceEnd; // Default if nothing is hit
+       
+       CurrentImpactPoint = TraceEnd; 
        bCurrentlyHittingTarget = false;
 
        FCollisionQueryParams CollisionParams;
        CollisionParams.AddIgnoredActor(GetOwner());
-       AActor* OwnerOwner = GetOwner()->GetOwner(); // If laser is on a turret owned by a ship
+       AActor* OwnerOwner = GetOwner()->GetOwner(); 
        if(OwnerOwner) CollisionParams.AddIgnoredActor(OwnerOwner);
 
+       bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, CollisionParams);
 
-
-       if (GetWorld()->LineTraceSingleByChannel(HitResult, TraceStart, TraceEnd, ECC_Visibility, CollisionParams)) // Consider ECC_Destructible if you make one
+       if (bHit)
        {
            CurrentImpactPoint = HitResult.ImpactPoint;
            bCurrentlyHittingTarget = true;
+           
+           AActor* HitActor = HitResult.GetActor();
+           if (HitActor)
+           {
+               // Log every 0.5 seconds to avoid spamming
+               static float LastHitLog = 0.0f;
+               float Now = GetWorld()->GetTimeSeconds();
+               if(Now - LastHitLog > 0.5f)
+               {
+                   UE_LOG(LogSolaraqMining, Log, TEXT("Trace HIT: %s | Comp: %s | PhysMat: %s"), 
+                       *HitActor->GetName(), 
+                       *HitResult.GetComponent()->GetName(),
+                       HitResult.PhysMaterial.IsValid() ? *HitResult.PhysMaterial->GetName() : TEXT("None"));
+                   LastHitLog = Now;
+               }
+           }
+
+           DrawDebugPoint(GetWorld(), HitResult.ImpactPoint, 10.0f, FColor::Red, false, -1.0f);
+           DrawDebugLine(GetWorld(), TraceStart, HitResult.ImpactPoint, FColor::Red, false, -1.0f, 0, 1.0f);
+
            ApplyMiningDamage(DeltaTime, HitResult);
-           // UE_LOG(LogTemp, Verbose, TEXT("MiningLaser hit %s at %s"), *HitResult.GetActor()->GetName(), *HitResult.ImpactPoint.ToString());
        }
        else
        {
-           // UE_LOG(LogTemp, Verbose, TEXT("MiningLaser hit nothing, endpoint %s"), *TraceEnd.ToString());
+           DrawDebugLine(GetWorld(), TraceStart, TraceEnd, FColor::Red, false, -1.0f, 0, 0.5f);
        }
 
-
-       // 3. Update Visuals (Beam and Impact)
+       // 3. Update Visuals
        UpdateLaserBeamVisuals(TraceStart, CurrentImpactPoint, bCurrentlyHittingTarget);
-       UpdateImpactEffect(HitResult, bCurrentlyHittingTarget); // Pass full HitResult
+       UpdateImpactEffect(HitResult, bCurrentlyHittingTarget);
    }
-   else // Laser not active, ensure effects are off
+   else 
    {
        if (ActiveBeamCascadePSC || ActiveBeamNiagaraComp || ActiveImpactCascadePSC || ActiveImpactNiagaraComp)
        {
-           StopLaserEffects(false); // Gentle stop
+           StopLaserEffects(false); 
        }
        bCurrentlyHittingTarget = false;
-       CurrentImpactPoint = GetLaserMuzzleLocation() + GetLaserMuzzleForwardVector() * MaxRange; // Still update for potential queries
+       CurrentImpactPoint = GetLaserMuzzleLocation() + GetLaserMuzzleForwardVector() * MaxRange; 
    }
-
-    // For Debugging
-    // DrawDebugLine(GetWorld(), TraceStart, CurrentImpactPoint, FColor::Red, false, -1, 0, 1.f);
 }
 
 void UMiningLaserComponent::UpdateLaserBeamVisuals(const FVector& BeamStart, const FVector& BeamEnd, bool bHitSomething)
@@ -463,19 +448,10 @@ void UMiningLaserComponent::UpdateLaserBeamVisuals(const FVector& BeamStart, con
 
 void UMiningLaserComponent::UpdateImpactEffect(const FHitResult& HitResult, bool bIsHitting)
 {
-    if (!ImpactParticleSystem) // This is UParticleSystem*, which can be Cascade or Niagara
+    if (!ImpactParticleSystem) 
     {
-        // If there's no template, ensure any active impact effects are stopped
-        if (ActiveImpactCascadePSC)
-        {
-            ActiveImpactCascadePSC->Deactivate();
-            // ActiveImpactCascadePSC->DestroyComponent(); ActiveImpactCascadePSC = nullptr; // Or immediate
-        }
-        if (ActiveImpactNiagaraComp)
-        {
-            ActiveImpactNiagaraComp->Deactivate();
-            // ActiveImpactNiagaraComp->DestroyComponent(); ActiveImpactNiagaraComp = nullptr; // Or immediate
-        }
+        if (ActiveImpactCascadePSC) ActiveImpactCascadePSC->Deactivate();
+        if (ActiveImpactNiagaraComp) ActiveImpactNiagaraComp->Deactivate();
         return;
     }
 
@@ -483,73 +459,56 @@ void UMiningLaserComponent::UpdateImpactEffect(const FHitResult& HitResult, bool
     {
         if (UNiagaraSystem* NiagaraImpactSystem = Cast<UNiagaraSystem>(ImpactParticleSystem))
         {
-            if (!ActiveImpactNiagaraComp) // If no active Niagara impact, spawn one
+            if (!ActiveImpactNiagaraComp) 
             {
                 ActiveImpactNiagaraComp = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-                    GetWorld(),
-                    NiagaraImpactSystem,
-                    HitResult.ImpactPoint,
-                    HitResult.ImpactNormal.Rotation()
+                    GetWorld(), NiagaraImpactSystem, HitResult.ImpactPoint, HitResult.ImpactNormal.Rotation()
                 );
-                UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent: Niagara Impact spawned at %s"), *HitResult.ImpactPoint.ToString());
+                UE_LOG(LogSolaraqMining, Verbose, TEXT("MiningLaserComponent: Niagara Impact spawned at %s"), *HitResult.ImpactPoint.ToString());
             }
-            else // Niagara impact exists, update it
+            else 
             {
                 ActiveImpactNiagaraComp->SetWorldLocationAndRotation(HitResult.ImpactPoint, HitResult.ImpactNormal.Rotation());
                 if (!ActiveImpactNiagaraComp->IsActive()) ActiveImpactNiagaraComp->ActivateSystem(true);
             }
-            // Deactivate any Cascade impact if Niagara is now active
-            if (ActiveImpactCascadePSC)
-            {
-                ActiveImpactCascadePSC->Deactivate();
-                // ActiveImpactCascadePSC->DestroyComponent(); ActiveImpactCascadePSC = nullptr; // Or immediate
-            }
+            if (ActiveImpactCascadePSC) ActiveImpactCascadePSC->Deactivate();
         }
-        else if (UParticleSystem* CascadeImpactSystem = Cast<UParticleSystem>(ImpactParticleSystem)) // It's a Cascade UParticleSystem
+        else if (UParticleSystem* CascadeImpactSystem = Cast<UParticleSystem>(ImpactParticleSystem)) 
         {
-            if (!ActiveImpactCascadePSC) // If no active Cascade impact, spawn one
+            if (!ActiveImpactCascadePSC) 
             {
                 ActiveImpactCascadePSC = UGameplayStatics::SpawnEmitterAtLocation(
-                    GetWorld(),
-                    CascadeImpactSystem,
-                    HitResult.ImpactPoint,
-                    HitResult.ImpactNormal.Rotation()
+                    GetWorld(), CascadeImpactSystem, HitResult.ImpactPoint, HitResult.ImpactNormal.Rotation()
                 );
-                UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent: Cascade Impact spawned at %s"), *HitResult.ImpactPoint.ToString());
+                UE_LOG(LogSolaraqMining, Verbose, TEXT("MiningLaserComponent: Cascade Impact spawned at %s"), *HitResult.ImpactPoint.ToString());
             }
-            else // Cascade impact exists, update it
+            else 
             {
                 ActiveImpactCascadePSC->SetWorldLocationAndRotation(HitResult.ImpactPoint, HitResult.ImpactNormal.Rotation());
                 if(!ActiveImpactCascadePSC->IsActive()) ActiveImpactCascadePSC->ActivateSystem(true);
             }
-            // Deactivate any Niagara impact if Cascade is now active
-            if (ActiveImpactNiagaraComp)
-            {
-                ActiveImpactNiagaraComp->Deactivate();
-                // ActiveImpactNiagaraComp->DestroyComponent(); ActiveImpactNiaraComp = nullptr; // Or immediate
-            }
+            if (ActiveImpactNiagaraComp) ActiveImpactNiagaraComp->Deactivate();
         }
     }
     else // Not hitting anything
     {
-        if (ActiveImpactCascadePSC)
-        {
-            ActiveImpactCascadePSC->Deactivate();
-            UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent: Cascade Impact PSC deactivated (no hit)."));
-        }
-        if (ActiveImpactNiagaraComp)
-        {
-            ActiveImpactNiagaraComp->Deactivate();
-            UE_LOG(LogTemp, Log, TEXT("MiningLaserComponent: Niagara Impact Comp deactivated (no hit)."));
-        }
+        if (ActiveImpactCascadePSC) ActiveImpactCascadePSC->Deactivate();
+        if (ActiveImpactNiagaraComp) ActiveImpactNiagaraComp->Deactivate();
     }
 }
 
 
 void UMiningLaserComponent::ApplyMiningDamage(float DeltaTime, const FHitResult& HitResult)
 {
-    if (!bCurrentlyHittingTarget || !HitResult.GetActor() || DamagePerSecond <= 0.f || !MiningDamageTypeClass)
+    if (!bCurrentlyHittingTarget || !HitResult.GetActor() || DamagePerSecond <= 0.f)
     {
+        return;
+    }
+
+    // Safety check just in case it was explicitly nulled out
+    if (!MiningDamageTypeClass)
+    {
+        // Error already logged in BeginPlay
         return;
     }
 
@@ -563,14 +522,24 @@ void UMiningLaserComponent::ApplyMiningDamage(float DeltaTime, const FHitResult&
 
     float DamageToApply = DamagePerSecond * DeltaTime;
 
-    // UE_LOG(LogSolaraq, Verbose, TEXT("Applying %.2f mining damage to %s"), DamageToApply, *HitActor->GetName());
     UGameplayStatics::ApplyPointDamage(
         HitActor,
         DamageToApply,
-        GetLaserMuzzleForwardVector(), // Direction of damage
-        HitResult,                  // Full hit result for more info (impact point, normal)
-        OwnerController,            // Instigating controller
-        GetOwner(),                 // Damage causer (the actor owning this component)
-        MiningDamageTypeClass       // Our custom damage type
+        GetLaserMuzzleForwardVector(), 
+        HitResult,                 
+        OwnerController,           
+        GetOwner(),                 
+        MiningDamageTypeClass      
     );
+
+    // --- DEBUG LOGGING ---
+    // Log once per second to confirm damage is flowing
+    static float LastDamageLog = 0.0f;
+    float Now = GetWorld()->GetTimeSeconds();
+    if(Now - LastDamageLog > 1.0f)
+    {
+        UE_LOG(LogSolaraqMining, Log, TEXT("Applied %.2f mining damage to %s using type %s"), 
+            DamageToApply, *HitActor->GetName(), *MiningDamageTypeClass->GetName());
+        LastDamageLog = Now;
+    }
 }

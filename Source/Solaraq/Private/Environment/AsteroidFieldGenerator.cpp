@@ -3,440 +3,352 @@
 #include "Environment/AsteroidFieldGenerator.h"
 #include "Components/SplineComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
-// #include "Engine/StaticMesh.h" // Already in .h, but good to note where it would come from
-#include "Math/RandomStream.h"       // For seeded random numbers
-#include "Logging/SolaraqLogChannels.h" // Your custom logging, good!
-#include "UObject/ConstructorHelpers.h" // For MakeUniqueObjectName
+#include "Math/RandomStream.h"
+#include "Logging/SolaraqLogChannels.h"
+#include "UObject/ConstructorHelpers.h"
 
-// Constructor: This is where we set up default values and create our components.
 AAsteroidFieldGenerator::AAsteroidFieldGenerator()
 {
-    PrimaryActorTick.bCanEverTick = false; // Good for performance if we don't need to tick every frame.
+    PrimaryActorTick.bCanEverTick = false;
 
-    // Create the SceneRoot component and set it as the RootComponent for this Actor.
     SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
     SetRootComponent(SceneRoot);
 
-    // Create the SplineComponent and attach it to the SceneRoot.
     SplineComponent = CreateDefaultSubobject<USplineComponent>(TEXT("Spline"));
     SplineComponent->SetupAttachment(SceneRoot);
-    SplineComponent->SetClosedLoop(true); // Let's make it a closed loop by default (e.g., for a ring).
-    SplineComponent->ClearSplinePoints(false); // Clear any default points.
+    SplineComponent->SetClosedLoop(true);
+    // Note: We don't force points here in the constructor anymore. 
+    // We rely on OnConstruction to build the initial circle based on the UPROPERTIES.
 
-    // Let's define a default circular spline shape.
-    // This provides a nice visual starting point in the editor.
-    const float DefaultRadius = 10000.0f;
-    const FVector P0 = FVector(DefaultRadius, 0.f, 0.f);
-    const FVector P1 = FVector(0.f, DefaultRadius, 0.f);
-    const FVector P2 = FVector(-DefaultRadius, 0.f, 0.f);
-    const FVector P3 = FVector(0.f, -DefaultRadius, 0.f);
+    // Spline Defaults
+    bAutoRebuildSpline = true;
+    FieldRadius = 1500.0f;
+    // Magic number for a Bezier circle approximation is ~0.55228 * Radius
+    TangentHandleLength = 1500.0f * 0.55228f; 
 
-    SplineComponent->AddSplinePoint(P0, ESplineCoordinateSpace::Local, false);
-    SplineComponent->AddSplinePoint(P1, ESplineCoordinateSpace::Local, false);
-    SplineComponent->AddSplinePoint(P2, ESplineCoordinateSpace::Local, false);
-    SplineComponent->AddSplinePoint(P3, ESplineCoordinateSpace::Local, false);
-
-    // Setting tangents to make it circular. The factor 1.64f is an approximation for circularity with 4 points.
-    const float TangentMagnitudeFactor = 1.64f ; // Adjusted slightly for better circle with 4 points
-    
-    const float TangentLength = DefaultRadius * TangentMagnitudeFactor; // Let's use what was there. Default tangents often work well too.
-    const FVector T0 = FVector(0.f, TangentLength, 0.f);
-    const FVector T1 = FVector(-TangentLength, 0.f, 0.f);
-    const FVector T2 = FVector(0.f, -TangentLength, 0.f);
-    const FVector T3 = FVector(TangentLength, 0.f, 0.f);
-
-    SplineComponent->SetSplinePointType(0, ESplinePointType::Curve, false);
-    SplineComponent->SetTangentAtSplinePoint(0, T0, ESplineCoordinateSpace::Local, false);
-    SplineComponent->SetSplinePointType(1, ESplinePointType::Curve, false);
-    SplineComponent->SetTangentAtSplinePoint(1, T1, ESplineCoordinateSpace::Local, false);
-    SplineComponent->SetSplinePointType(2, ESplinePointType::Curve, false);
-    SplineComponent->SetTangentAtSplinePoint(2, T2, ESplineCoordinateSpace::Local, false);
-    SplineComponent->SetSplinePointType(3, ESplinePointType::Curve, false);
-    SplineComponent->SetTangentAtSplinePoint(3, T3, ESplineCoordinateSpace::Local, false); // Corrected typo
-    SplineComponent->UpdateSpline(); // IMPORTANT: Always call UpdateSpline after modifying points/tangents.
-
-    // Default values for our editable properties.
+    // Generator Defaults
     NumberOfInstances = 100;
+    NumberOfInteractables = 10;
+    bRestrictInteractablesToPlane = true;
+    GameplayPlaneOffsetZ = 0.0f;
+    
     RandomSeed = 12345;
-    bFillArea = false; // Default to a belt.
+    bFillArea = false;
     BeltWidth = 2000.0f;
     BeltHeight = 500.0f;
-    FieldHeight = 1000.0f; // Only used if bFillArea is true.
+    FieldHeight = 1000.0f;
     MinScale = 0.5f;
     MaxScale = 1.5f;
     bRandomYaw = true;
     bRandomPitchRoll = true;
-    bIsGenerating = false; // Initialize our safety flag.
+    bIsGenerating = false;
 }
 
 void AAsteroidFieldGenerator::BeginPlay()
 {
     Super::BeginPlay();
-    // We typically generate asteroids in the editor via OnConstruction or the button.
-    // You could uncomment the line below if you wanted to generate them at runtime when the game starts.
-    // Make sure generation is fast enough if you do this!
-    if (!GetWorld()->IsEditorWorld() && GetWorld()->IsGameWorld())
-    {
-        // GenerateAsteroids(); // Optionally generate at runtime
-    }
 }
 
-// This is called when the Actor is placed in the editor or when its properties are changed
-// (if "Run Construction Script on Drag" is enabled in Class Settings for this Actor).
 void AAsteroidFieldGenerator::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
-    // Regenerate asteroids whenever the actor is moved or settings are changed in the editor.
-    // This gives instant feedback!
+
+    // If enabled, strictly enforce the circular shape defined by Radius/Tangent
+    // This allows you to resize it easily in details, but you should uncheck it
+    // if you want to manually move spline points.
+    if (bAutoRebuildSpline)
+    {
+        RebuildSpline();
+    }
+
     GenerateAsteroids();
 }
 
 #if WITH_EDITOR
-// This function is triggered after a property is changed in the Details panel of the editor.
 void AAsteroidFieldGenerator::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
-    Super::PostEditChangeProperty(PropertyChangedEvent);
-
-    // Get the name of the property that changed.
-    const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
-
-    // We only want to regenerate if relevant properties have changed.
-    // This prevents unnecessary regeneration for properties that don't affect the visual outcome.
-    if (PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, AsteroidTypes) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, NumberOfInstances) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, RandomSeed) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, bFillArea) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, BeltWidth) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, BeltHeight) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, FieldHeight) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, MinScale) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, MaxScale) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, bRandomYaw) ||
-        PropertyName == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, bRandomPitchRoll) ||
-        // Also, if the SplineComponent itself changes, we might want to regenerate.
-        // However, spline changes often trigger OnConstruction anyway.
-        // For direct spline point manipulation, OnConstruction usually handles it.
-        (PropertyChangedEvent.MemberProperty && PropertyChangedEvent.MemberProperty->GetFName() == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, SplineComponent))
-       )
+    // Auto-update tangent length if radius changes (optional QOL)
+    if (PropertyChangedEvent.Property && PropertyChangedEvent.Property->GetFName() == GET_MEMBER_NAME_CHECKED(AAsteroidFieldGenerator, FieldRadius))
     {
-        GenerateAsteroids();
+        if (bAutoRebuildSpline)
+        {
+            TangentHandleLength = FieldRadius * 0.55228f;
+        }
     }
-}
-#endif // WITH_EDITOR
 
-// The Big One! This function does all the work.
+    Super::PostEditChangeProperty(PropertyChangedEvent);
+    
+    // GenerateAsteroids is called via OnConstruction, but sometimes strictly editor-only changes 
+    // need an explicit call if OnConstruction doesn't fire for that specific property type.
+    // Usually OnConstruction is enough.
+}
+#endif
+
+void AAsteroidFieldGenerator::RebuildSpline()
+{
+    if (!SplineComponent) return;
+
+    SplineComponent->ClearSplinePoints(false);
+
+    // 4-Point Circle Calculation
+    // P0: (R, 0)
+    // P1: (0, R)
+    // P2: (-R, 0)
+    // P3: (0, -R)
+    
+    // For Counter-Clockwise rotation:
+    // P0 Tangent points +Y
+    // P1 Tangent points -X
+    // P2 Tangent points -Y
+    // P3 Tangent points +X
+
+    const float R = FieldRadius;
+    const float L = TangentHandleLength;
+
+    // Point 0 (Right)
+    SplineComponent->AddSplinePoint(FVector(R, 0.f, 0.f), ESplineCoordinateSpace::Local, false);
+    SplineComponent->SetTangentsAtSplinePoint(0, FVector(0.f, L, 0.f), FVector(0.f, L, 0.f), ESplineCoordinateSpace::Local, false);
+
+    // Point 1 (Forward)
+    SplineComponent->AddSplinePoint(FVector(0.f, R, 0.f), ESplineCoordinateSpace::Local, false);
+    SplineComponent->SetTangentsAtSplinePoint(1, FVector(-L, 0.f, 0.f), FVector(-L, 0.f, 0.f), ESplineCoordinateSpace::Local, false);
+
+    // Point 2 (Left)
+    SplineComponent->AddSplinePoint(FVector(-R, 0.f, 0.f), ESplineCoordinateSpace::Local, false);
+    SplineComponent->SetTangentsAtSplinePoint(2, FVector(0.f, -L, 0.f), FVector(0.f, -L, 0.f), ESplineCoordinateSpace::Local, false);
+
+    // Point 3 (Back)
+    SplineComponent->AddSplinePoint(FVector(0.f, -R, 0.f), ESplineCoordinateSpace::Local, false);
+    SplineComponent->SetTangentsAtSplinePoint(3, FVector(L, 0.f, 0.f), FVector(L, 0.f, 0.f), ESplineCoordinateSpace::Local, true);
+
+    SplineComponent->UpdateSpline();
+}
+
 void AAsteroidFieldGenerator::GenerateAsteroids()
 {
-    // Safety check: if we're already generating, don't start another generation process.
-    // This can prevent infinite loops or crashes if events trigger rapidly.
     if (bIsGenerating) return;
-    bIsGenerating = true; // Set the flag
+    bIsGenerating = true;
 
-    // We absolutely need a SplineComponent to define the area.
     if (!SplineComponent)
     {
-        UE_LOG(LogSolaraqSystem, Error, TEXT("AsteroidFieldGenerator %s: Missing Spline component! Cannot generate asteroids."), *GetName());
-        bIsGenerating = false; // Reset flag before exiting
+        bIsGenerating = false;
         return;
     }
 
-    // --- 1. Cleanup Phase: Clear existing instances and HISM components ---
-    // Before generating new asteroids, we need to remove any old ones.
-    // This involves clearing instances from each HISM and then destroying the HISM component itself.
-    UE_LOG(LogSolaraqSystem, Verbose, TEXT("AsteroidFieldGenerator %s: Clearing previous HISM components (%d found)."), *GetName(), HISMComponents.Num());
+    FRandomStream RandomStream(RandomSeed);
+
+    // =========================================================
+    // 1. CLEANUP PHASE
+    // =========================================================
+    
     for (TObjectPtr<UHierarchicalInstancedStaticMeshComponent> HISM : HISMComponents)
     {
-        if (HISM) // Always check if the pointer is valid
+        if (HISM)
         {
-            HISM->ClearInstances();        // Remove all instances from this HISM.
-            HISM->UnregisterComponent();   // Unregister from the world.
-            HISM->DestroyComponent();      // Mark for destruction.
+            HISM->ClearInstances();
+            HISM->UnregisterComponent();
+            HISM->DestroyComponent();
         }
     }
-    HISMComponents.Empty(); // Clear our array of HISM component pointers.
+    HISMComponents.Empty();
 
-    // --- 2. Preparation Phase: Process AsteroidTypes and prepare for weighted selection ---
-    // We need to:
-    //   a) Load the meshes defined in AsteroidTypes.
-    //   b) Create one HISM component for each *unique* static mesh.
-    //   c) Collect data for weighted random selection of asteroid types.
+    for (TObjectPtr<AActor> Actor : SpawnedInteractables)
+    {
+        if (Actor && IsValid(Actor))
+        {
+            Actor->Destroy();
+        }
+    }
+    SpawnedInteractables.Empty();
 
-    // This map will store a unique UStaticMesh* as a key and its corresponding HISMComponent as the value.
-    // TObjectPtr ensures proper lifetime management with Unreal's UObject system.
+    // =========================================================
+    // 2. GENERATE VISUAL ASTEROIDS (HISM)
+    // =========================================================
+    
     TMap<TObjectPtr<UStaticMesh>, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> MeshToHISMMap;
+    TArray<const FAsteroidTypeDefinition*> ValidVisualTypes;
+    float TotalVisualWeight = 0.0f;
 
-    // This array will store pointers to valid FAsteroidTypeDefinition structs that we can actually use.
-    // We store pointers to avoid copying the structs and to easily access their 'Weight'.
-    TArray<const FAsteroidTypeDefinition*> ValidSelectableTypes;
-    float TotalWeight = 0.0f; // Sum of weights of all valid asteroid types.
-
-    UE_LOG(LogSolaraqSystem, Verbose, TEXT("AsteroidFieldGenerator %s: Processing %d AsteroidTypes entries."), *GetName(), AsteroidTypes.Num());
     for (const FAsteroidTypeDefinition& TypeDef : AsteroidTypes)
     {
-        // Validate the TypeDef:
-        // - Mesh must be set (not null).
-        // - Weight must be positive (otherwise, it would never be selected or cause issues).
-        if (TypeDef.Mesh.IsNull())
-        {
-            UE_LOG(LogSolaraqSystem, Warning, TEXT("AsteroidFieldGenerator %s: AsteroidType entry has a null mesh. Skipping."), *GetName());
-            continue;
-        }
-        if (TypeDef.Weight <= 0.0f)
-        {
-            UE_LOG(LogSolaraqSystem, Warning, TEXT("AsteroidFieldGenerator %s: AsteroidType with mesh %s has zero or negative weight (%.2f). Skipping."),
-                *GetName(), *TypeDef.Mesh.ToString(), TypeDef.Weight);
-            continue;
-        }
-
-        // Try to load the mesh. TSoftObjectPtr::LoadSynchronous() loads it immediately.
+        if (TypeDef.Mesh.IsNull() || TypeDef.Weight <= 0.0f) continue;
         TObjectPtr<UStaticMesh> LoadedMesh = TypeDef.Mesh.LoadSynchronous();
-        if (!LoadedMesh)
-        {
-            UE_LOG(LogSolaraqSystem, Warning, TEXT("AsteroidFieldGenerator %s: Failed to load mesh %s. Skipping."), *GetName(), *TypeDef.Mesh.ToString());
-            continue;
-        }
+        if (!LoadedMesh) continue;
 
-        // Now, check if we already have a HISM for this specific mesh.
         if (!MeshToHISMMap.Contains(LoadedMesh))
         {
-            // If not, create a new HISM component for this mesh.
-            // We need a unique name for each new component. MakeUniqueObjectName helps with this.
-            FName HISMName = MakeUniqueObjectName(this, UHierarchicalInstancedStaticMeshComponent::StaticClass(), FName(*FString::Printf(TEXT("AsteroidHISM_%s"), *LoadedMesh->GetName())));
-            
-            // NewObject is how you create UObjects dynamically in C++.
+            FName HISMName = MakeUniqueObjectName(this, UHierarchicalInstancedStaticMeshComponent::StaticClass(), FName(*FString::Printf(TEXT("VisualHISM_%s"), *LoadedMesh->GetName())));
             TObjectPtr<UHierarchicalInstancedStaticMeshComponent> NewHISM = NewObject<UHierarchicalInstancedStaticMeshComponent>(this, HISMName);
-            if (NewHISM)
+            NewHISM->SetupAttachment(SceneRoot);
+            NewHISM->SetStaticMesh(LoadedMesh);
+            NewHISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); 
+            NewHISM->RegisterComponent();
+            HISMComponents.Add(NewHISM);
+            MeshToHISMMap.Add(LoadedMesh, NewHISM);
+        }
+        ValidVisualTypes.Add(&TypeDef);
+        TotalVisualWeight += TypeDef.Weight;
+    }
+
+    if (TotalVisualWeight > 0.0f && NumberOfInstances > 0)
+    {
+        for (int32 i = 0; i < NumberOfInstances; ++i)
+        {
+            float RandomPick = RandomStream.FRandRange(0.f, TotalVisualWeight);
+            const FAsteroidTypeDefinition* SelectedType = nullptr;
+            float CurrentWeight = 0.f;
+            for (const auto* Type : ValidVisualTypes) {
+                if (RandomPick <= CurrentWeight + Type->Weight) { SelectedType = Type; break; }
+                CurrentWeight += Type->Weight;
+            }
+            if(!SelectedType) SelectedType = ValidVisualTypes[0];
+
+            FVector Pos;
+            if (bFillArea) Pos = GetRandomPointInFieldVolume(RandomStream);
+            else Pos = GetRandomPointInBeltVolume(RandomStream);
+
+            FTransform Trans = CalculateInstanceTransform(Pos, RandomStream);
+            TObjectPtr<UStaticMesh> MeshKey = SelectedType->Mesh.Get();
+
+            if (MeshToHISMMap.Contains(MeshKey))
             {
-                NewHISM->SetupAttachment(SceneRoot);       // Attach to our actor's root.
-                NewHISM->SetStaticMesh(LoadedMesh);        // Assign the loaded mesh to this HISM.
-                NewHISM->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); // Or your desired collision
-                NewHISM->SetCollisionProfileName(UCollisionProfile::BlockAllDynamic_ProfileName); // Standard profile
-                NewHISM->RegisterComponent();              // IMPORTANT: Make the component active in the world.
+                TObjectPtr<UHierarchicalInstancedStaticMeshComponent> HISM = MeshToHISMMap[MeshKey];
+                if (HISM)
+                {
+                    HISM->AddInstance(Trans);
+                }
+            }
+        }
+    }
+
+    // =========================================================
+    // 3. GENERATE INTERACTABLE ASTEROIDS (ACTORS)
+    // =========================================================
+
+    if (NumberOfInteractables > 0 && InteractableTypes.Num() > 0)
+    {
+        float TotalInteractableWeight = 0.0f;
+        TArray<const FInteractableAsteroidDef*> ValidInteractableTypes;
+
+        for (const FInteractableAsteroidDef& TypeDef : InteractableTypes)
+        {
+            if (TypeDef.ActorClass && TypeDef.Weight > 0.0f)
+            {
+                ValidInteractableTypes.Add(&TypeDef);
+                TotalInteractableWeight += TypeDef.Weight;
+            }
+        }
+
+        if (TotalInteractableWeight > 0.0f)
+        {
+            for (int32 i = 0; i < NumberOfInteractables; ++i)
+            {
+                float RandomPick = RandomStream.FRandRange(0.f, TotalInteractableWeight);
+                const FInteractableAsteroidDef* SelectedType = nullptr;
+                float CurrentWeight = 0.f;
+                for (const auto* Type : ValidInteractableTypes) {
+                    if (RandomPick <= CurrentWeight + Type->Weight) { SelectedType = Type; break; }
+                    CurrentWeight += Type->Weight;
+                }
+                if (!SelectedType) SelectedType = ValidInteractableTypes[0];
+
+                FVector InstancePos;
+                if (bFillArea) InstancePos = GetRandomPointInFieldVolume(RandomStream);
+                else InstancePos = GetRandomPointInBeltVolume(RandomStream);
+
+                if (bRestrictInteractablesToPlane)
+                {
+                    InstancePos.Z = GameplayPlaneOffsetZ;
+                }
+
+                FRotator InstanceRot = FRotator::ZeroRotator;
+                if (bRandomYaw) InstanceRot.Yaw = RandomStream.FRandRange(0.0f, 360.0f);
                 
-                HISMComponents.Add(NewHISM);              // Add to our main list for tracking and future cleanup.
-                MeshToHISMMap.Add(LoadedMesh, NewHISM);   // Add to our map for quick lookup.
-                UE_LOG(LogSolaraqSystem, Verbose, TEXT("AsteroidFieldGenerator %s: Created HISM '%s' for mesh %s."), *GetName(), *HISMName.ToString(), *LoadedMesh->GetName());
+                if (bRandomPitchRoll && !bRestrictInteractablesToPlane) 
+                {
+                    InstanceRot.Pitch = RandomStream.FRandRange(0.0f, 360.0f);
+                    InstanceRot.Roll = RandomStream.FRandRange(0.0f, 360.0f);
+                }
+
+                float Scale = RandomStream.FRandRange(MinScale, MaxScale);
+
+                FVector WorldPos = GetTransform().TransformPosition(InstancePos);
+                FRotator WorldRot = GetTransform().TransformRotation(InstanceRot.Quaternion()).Rotator();
+
+                FActorSpawnParameters SpawnParams;
+                SpawnParams.Owner = this;
+                SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+#if WITH_EDITOR
+                SpawnParams.bTemporaryEditorActor = false; 
+#endif
+
+                AActor* NewActor = GetWorld()->SpawnActor<AActor>(SelectedType->ActorClass, WorldPos, WorldRot, SpawnParams);
+                if (NewActor)
+                {
+                    NewActor->SetActorScale3D(FVector(Scale));
+                    NewActor->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
+                    SpawnedInteractables.Add(NewActor);
+                }
             }
-            else
-            {
-                UE_LOG(LogSolaraqSystem, Error, TEXT("AsteroidFieldGenerator %s: Failed to create NewHISM for mesh %s. Skipping this type."), *GetName(), *LoadedMesh->GetName());
-                continue; // Skip this TypeDef if HISM creation failed.
-            }
-        }
-        
-        // If we've reached here, the mesh is loaded, and a HISM exists for it.
-        // Add this type to our list of types we can pick from, and add its weight to the total.
-        ValidSelectableTypes.Add(&TypeDef); // Store a pointer to the original TypeDef.
-        TotalWeight += TypeDef.Weight;
-    }
-
-    // If there are no valid types to select from (e.g., all meshes failed to load, or all weights were zero),
-    // then there's nothing to generate.
-    if (ValidSelectableTypes.IsEmpty() || TotalWeight <= 0.0f)
-    {
-        UE_LOG(LogSolaraqSystem, Warning, TEXT("AsteroidFieldGenerator %s: No valid asteroid types to generate from (check meshes and weights). TotalWeight: %.2f. Aborting generation."), *GetName(), TotalWeight);
-        bIsGenerating = false; // Reset flag
-        return;
-    }
-    UE_LOG(LogSolaraqSystem, Log, TEXT("AsteroidFieldGenerator %s: Prepared %d unique HISM components for %d valid selectable asteroid types. Total weight: %.2f"),
-        *GetName(), MeshToHISMMap.Num(), ValidSelectableTypes.Num(), TotalWeight);
-
-
-    // --- 3. Instantiation Phase: Create and place asteroid instances ---
-    if (NumberOfInstances <= 0)
-    {
-        UE_LOG(LogSolaraqSystem, Log, TEXT("AsteroidFieldGenerator %s: NumberOfInstances is %d. No instances will be generated."), *GetName(), NumberOfInstances);
-        bIsGenerating = false; // Reset flag
-        return;
-    }
-
-    // Initialize our random number stream with the specified seed.
-    // This ensures that if the seed is the same, the "random" sequence will also be the same,
-    // leading to a repeatable asteroid field layout.
-    FRandomStream RandomStream(RandomSeed);
-    int32 TotalInstancesAdded = 0;
-
-    // Loop to create the desired number of asteroid instances.
-    for (int32 i = 0; i < NumberOfInstances; ++i)
-    {
-        // --- Weighted Random Selection of Asteroid Type ---
-        // Pick a random value between 0 and TotalWeight.
-        float RandomPick = RandomStream.FRandRange(0.f, TotalWeight);
-        const FAsteroidTypeDefinition* SelectedType = nullptr;
-        float CurrentCumulativeWeight = 0.f;
-
-        // Iterate through our valid types. Imagine all types lined up, each occupying a segment
-        // proportional to its weight. We "walk" along this line until our RandomPick falls into a segment.
-        for (const FAsteroidTypeDefinition* TypePtr : ValidSelectableTypes)
-        {
-            // TypePtr should always be valid as we only added valid pointers.
-            if (RandomPick <= CurrentCumulativeWeight + TypePtr->Weight)
-            {
-                SelectedType = TypePtr;
-                break; // Found our type!
-            }
-            CurrentCumulativeWeight += TypePtr->Weight;
-        }
-
-        // Fallback: If something went wrong (e.g., floating point precision with TotalWeight),
-        // or if RandomPick was exactly TotalWeight and the last item wasn't picked,
-        // just pick the first valid type. This should be rare.
-        if (!SelectedType)
-        {
-            if (!ValidSelectableTypes.IsEmpty())
-            {
-                SelectedType = ValidSelectableTypes[0];
-                UE_LOG(LogSolaraqSystem, Warning, TEXT("AsteroidFieldGenerator %s: Weighted selection fallback triggered. Using first valid type."), *GetName());
-            }
-            else
-            {
-                UE_LOG(LogSolaraqSystem, Error, TEXT("AsteroidFieldGenerator %s: Weighted selection failed and no valid types available. This shouldn't happen."), *GetName());
-                continue; // Should not be reachable if initial checks passed.
-            }
-        }
-        
-        // Now we have a SelectedType. Get its mesh.
-        // Since TSoftObjectPtr::Get() returns nullptr if not loaded, and we loaded them earlier,
-        // this should be safe. But a paranoid check or re-load doesn't hurt.
-        TObjectPtr<UStaticMesh> MeshForInstance = SelectedType->Mesh.Get();
-        if (!MeshForInstance)
-        {
-            // Mesh might have been garbage collected if not referenced strongly elsewhere,
-            // or if it was never successfully loaded into the MeshToHISMMap.
-            // Attempt to re-load it.
-            MeshForInstance = SelectedType->Mesh.LoadSynchronous();
-            if (!MeshForInstance)
-            {
-                UE_LOG(LogSolaraqSystem, Error, TEXT("AsteroidFieldGenerator %s: Failed to get/load mesh %s for selected type. Skipping instance."), *GetName(), *SelectedType->Mesh.ToString());
-                continue;
-            }
-        }
-
-        // Find the HISM component associated with this mesh.
-        const TObjectPtr<UHierarchicalInstancedStaticMeshComponent>* FoundHISM_PtrPtr = MeshToHISMMap.Find(MeshForInstance);
-        if (FoundHISM_PtrPtr && *FoundHISM_PtrPtr) // Check if pointer-to-pointer is valid, then check if the TObjectPtr itself is valid
-        {
-            TObjectPtr<UHierarchicalInstancedStaticMeshComponent> TargetHISM = *FoundHISM_PtrPtr;
-
-            // Determine the base position for this asteroid.
-            FVector InstanceBasePosition;
-            if (bFillArea)
-            {
-                InstanceBasePosition = GetRandomPointInFieldVolume(RandomStream);
-            }
-            else
-            {
-                InstanceBasePosition = GetRandomPointInBeltVolume(RandomStream);
-            }
-
-            // Calculate the final transform (position, rotation, scale).
-            FTransform InstanceTransform = CalculateInstanceTransform(InstanceBasePosition, RandomStream);
-            
-            // Add the instance to the HISM! This is the actual spawning.
-            TargetHISM->AddInstance(InstanceTransform);
-            TotalInstancesAdded++;
-        }
-        else
-        {
-             UE_LOG(LogSolaraqSystem, Error, TEXT("AsteroidFieldGenerator %s: Could not find HISM for selected mesh %s! This indicates an internal logic error."), *GetName(), *MeshForInstance->GetName());
         }
     }
 
-    UE_LOG(LogSolaraqSystem, Log, TEXT("AsteroidFieldGenerator %s: Successfully generated %d total instances across %d HISM components using weighted selection."), *GetName(), TotalInstancesAdded, MeshToHISMMap.Num());
-    bIsGenerating = false; // Reset the flag, generation is complete.
+    bIsGenerating = false;
 }
 
-// --- Helper Functions ---
-
-// Gets a random point within a belt-like volume defined by the spline.
 FVector AAsteroidFieldGenerator::GetRandomPointInBeltVolume(const FRandomStream& Stream) const
 {
-    // Ensure SplineComponent is valid (should be, as GenerateAsteroids checks, but defensive coding is good)
-	if (!SplineComponent) return FVector::ZeroVector;
+    if (!SplineComponent) return FVector::ZeroVector;
 
 	const float SplineLength = SplineComponent->GetSplineLength();
-	if (SplineLength < KINDA_SMALL_NUMBER) // Avoid division by zero or issues with tiny splines
-    {
-        UE_LOG(LogSolaraqSystem, Warning, TEXT("AsteroidFieldGenerator %s: Spline length is very small in GetRandomPointInBeltVolume."), *GetName());
-        return SplineComponent->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local); // Return start point
-    }
+    if (SplineLength < 1.0f) return SplineComponent->GetLocationAtSplinePoint(0, ESplineCoordinateSpace::Local);
 
-    // Pick a random distance along the spline.
 	const float DistanceAlongSpline = Stream.FRandRange(0.0f, SplineLength);
-    // Get the location, direction (tangent), and up vector at that point on the spline.
-    // These are in Local space relative to the SplineComponent.
 	const FVector PointOnSpline = SplineComponent->GetLocationAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::Local);
-	const FVector DirectionOnSpline = SplineComponent->GetDirectionAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::Local);
+	// Using Direction/Up allows the belt to twist if the spline twists, though usually it's flat
 	const FVector UpVectorOnSpline = SplineComponent->GetUpVectorAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::Local);
-
-    // Calculate the "right" vector relative to the spline's orientation.
+    // Standard Right Vector calculation
+    const FVector DirectionOnSpline = SplineComponent->GetDirectionAtDistanceAlongSpline(DistanceAlongSpline, ESplineCoordinateSpace::Local);
 	const FVector RightVectorOnSpline = FVector::CrossProduct(DirectionOnSpline, UpVectorOnSpline).GetSafeNormal();
 
-    // Random offsets for width (along RightVector) and height (along UpVector).
 	const float OffsetWidth = Stream.FRandRange(-BeltWidth * 0.5f, BeltWidth * 0.5f);
 	const float OffsetHeight = Stream.FRandRange(-BeltHeight * 0.5f, BeltHeight * 0.5f);
 
-    // Combine the point on the spline with the offsets to get the final position.
+    // We assume Up is Z, Right is XY perp.
 	FVector Position = PointOnSpline + (RightVectorOnSpline * OffsetWidth) + (UpVectorOnSpline * OffsetHeight);
-
 	return Position; 
 }
 
-// Gets a random point within a volume roughly defined by the spline's extents.
 FVector AAsteroidFieldGenerator::GetRandomPointInFieldVolume(const FRandomStream& Stream) const
 {
-    // Ensure SplineComponent is valid
     if (!SplineComponent) return FVector::ZeroVector;
 
 	FBoxSphereBounds SplineBoundsLocal = SplineComponent->GetLocalBounds();
-    // Using local bounds is simpler and more aligned with how instances are placed (in local space).
-    // The original code calculated world bounds then converted back, which is fine, but GetLocalBounds() is more direct.
-
-	// We'll generate points within a cylinder or flattened sphere defined by these bounds.
-    // The original code used a disk shape projection and then offset Z. This is a good approach.
 	const float MaxRadiusXY = FMath::Max(SplineBoundsLocal.BoxExtent.X, SplineBoundsLocal.BoxExtent.Y);
 
-    // Generate a random point in a disk (polar coordinates).
-    // Using Sqrt(Stream.FRand()) gives a more uniform distribution across the disk's area.
 	const float RandomAngle = Stream.FRandRange(0.0f, 2.0f * PI);
 	const float RandomRadius = FMath::Sqrt(Stream.FRand()) * MaxRadiusXY; 
 	
-    // Convert polar to Cartesian coordinates relative to the spline's local center.
 	const float OffsetX = FMath::Cos(RandomAngle) * RandomRadius;
 	const float OffsetY = FMath::Sin(RandomAngle) * RandomRadius;
-    // Random Z offset within the defined FieldHeight.
 	const float OffsetZ = Stream.FRandRange(-FieldHeight * 0.5f, FieldHeight * 0.5f);
 
-    // The final position is the center of the spline's local bounds plus our random offsets.
-    // SplineBoundsLocal.Origin is the center of the local bounding box.
 	FVector LocalPosition = SplineBoundsLocal.Origin + FVector(OffsetX, OffsetY, OffsetZ);
-
-    // Note: The original code calculated spline bounds in World space, then transformed the random point
-    // back to Local space. Generating directly in Local space using LocalBounds is often simpler
-    // if the final instance transforms are also in Local space relative to the Actor's root.
-    // Since AddInstance takes local transforms, this is consistent.
 	return LocalPosition;
 }
 
-// Calculates the scale and rotation for an individual asteroid instance.
 FTransform AAsteroidFieldGenerator::CalculateInstanceTransform(const FVector& LocalPosition, const FRandomStream& Stream) const
 {
-    // Random scale within the defined min/max range.
 	const float Scale = Stream.FRandRange(MinScale, MaxScale);
-	const FVector Scale3D(Scale); // Uniform scaling.
+	const FVector Scale3D(Scale); 
 
-    // Random rotation.
 	FRotator Rotation = FRotator::ZeroRotator;
-	if (bRandomYaw)
-	{
-		Rotation.Yaw = Stream.FRandRange(0.0f, 360.0f);
-	}
-	if (bRandomPitchRoll) // If true, randomize both pitch and roll.
+	if (bRandomYaw) Rotation.Yaw = Stream.FRandRange(0.0f, 360.0f);
+	if (bRandomPitchRoll) 
 	{
 		Rotation.Pitch = Stream.FRandRange(0.0f, 360.0f);
 		Rotation.Roll = Stream.FRandRange(0.0f, 360.0f);
 	}
 
-    // Construct the final transform using the provided LocalPosition, calculated Rotation, and Scale.
 	return FTransform(Rotation, LocalPosition, Scale3D);
 }

@@ -1,10 +1,10 @@
-#include "Actors/Interactables/InteractableChair.h" // Adjust path
+#include "Actors/Interactables/SolaraqInteractableChair.h" // Adjust path
 #include "Pawns/SolaraqCharacterPawn.h"
 #include "Controllers/SolaraqCharacterPlayerController.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SceneComponent.h"
 
-AInteractableChair::AInteractableChair()
+ASolaraqInteractableChair::ASolaraqInteractableChair()
 {
     PrimaryActorTick.bCanEverTick = false;
 
@@ -25,12 +25,12 @@ AInteractableChair::AInteractableChair()
     SeatedPawn = nullptr;
 }
 
-FVector AInteractableChair::GetEntryPointLocation() const
+FVector ASolaraqInteractableChair::GetEntryPointLocation() const
 {
     return EntryPoint->GetComponentLocation();
 }
 
-void AInteractableChair::Interact_Implementation(APawn* InteractingPawn)
+void ASolaraqInteractableChair::Interact_Implementation(APawn* InteractingPawn)
 {
     ASolaraqCharacterPawn* SolaraqChar = Cast<ASolaraqCharacterPawn>(InteractingPawn);
     if (!SolaraqChar) return;
@@ -43,35 +43,40 @@ void AInteractableChair::Interact_Implementation(APawn* InteractingPawn)
         return;
     }
 
-    // Case 2: Someone else is sitting -> Do nothing
+    // Case 2: Chair is occupied -> Do nothing
     if (SeatedPawn != nullptr) return;
 
     // --- DISTANCE CHECK ---
-    float DistanceToSeat = FVector::Dist(SolaraqChar->GetActorLocation(), EntryPoint->GetComponentLocation());
-    
-    // We allow a small tolerance (e.g., 15 units)
-    if (DistanceToSeat > 15.0f) 
+    FVector CharLoc = SolaraqChar->GetActorLocation();
+    FVector EntryLoc = EntryPoint->GetComponentLocation();
+    CharLoc.Z = 0; 
+    EntryLoc.Z = 0;
+
+    float DistanceToSeat = FVector::Dist(CharLoc, EntryLoc);
+
+    // Same tolerances as before
+    if (DistanceToSeat > 60.0f) 
     {
-        // Case 3: Too far away -> Request Controller to walk us here
         if (ASolaraqCharacterPlayerController* PC = Cast<ASolaraqCharacterPlayerController>(SolaraqChar->GetController()))
         {
-            // The Controller will walk the pawn here, and then CALL THIS FUNCTION AGAIN.
-            PC->RequestMoveToInteract(this, EntryPoint->GetComponentLocation());
+            PC->RequestMoveToInteract(this, EntryPoint->GetComponentLocation(), 50.0f);
         }
     }
     else
     {
-        // Case 4: We are close enough -> SIT
         Sit(SolaraqChar);
     }
 }
 
-void AInteractableChair::Sit(ASolaraqCharacterPawn* PawnToSit)
+void ASolaraqInteractableChair::Sit(ASolaraqCharacterPawn* PawnToSit)
 {
     if (!PawnToSit || SeatedPawn != nullptr) return;
 
     SeatedPawn = PawnToSit;
     
-    // Perform the physical attach logic on the pawn
-    PawnToSit->SitDown(SeatAttachmentPoint);
+    // CHANGED: Call the new Sequence function
+    if (SeatAttachmentPoint && EntryPoint)
+    {
+        PawnToSit->BeginSittingSequence(EntryPoint, SeatAttachmentPoint);
+    }
 }

@@ -120,6 +120,13 @@ public:
     /** Moves an item from this inventory to a Target Inventory Component. */
     UFUNCTION(BlueprintCallable, Category = "Solaraq|Inventory")
     bool TransferItemTo(UInventoryComponent* TargetInventory, const FGuid& ItemID, FIntPoint TargetPos);
+
+    /** 
+     * Attempts to move ALL items from this inventory to the Target Inventory.
+     * Continues trying subsequent items even if one fails to fit.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Solaraq|Inventory")
+    void TransferAllItemsTo(UInventoryComponent* TargetInventory);
     
     /** Returns the configured width of the inventory grid. */
     UFUNCTION(BlueprintPure, Category = "Solaraq|Inventory|Grid")

@@ -1,18 +1,14 @@
+// Environment/DestructibleAsteroid.cpp
 #include "Environment/DestructibleAsteroid.h"
 #include "Kismet/GameplayStatics.h"
-// #include "Logging/SolaraqLogChannels.h"
+#include "Items/ItemPickup.h"         // Required to set the ItemData
+#include "Items/ItemDataAssetBase.h" 
 
 ADestructibleAsteroid::ADestructibleAsteroid() :
-    LootDropChance(0.3f) // Default loot drop chance
+    LootDropChance(1.0f) // Keep at 100% for testing
 {
-    // Set any default values specific to asteroids that might differ from DestructibleBase defaults
-    // For example, asteroids might generally have more health than small debris
     MaxHealth = 150.0f;
     MinSignificantDamageToFracture = 30.0f;
-
-    // The GeometryCollectionComponent is already created and set up by the base class.
-    // You would assign the specific Geometry Collection asset (GC_Asteroid) in the Blueprint
-    // derived from this C++ class, or you could hardcode a path here if all asteroids use the same GC.
 }
 
 void ADestructibleAsteroid::BeginPlay()
@@ -26,44 +22,44 @@ void ADestructibleAsteroid::BeginPlay()
 
 void ADestructibleAsteroid::OnFullyDestroyed_Implementation(AActor* DamageCauser)
 {
-    Super::OnFullyDestroyed_Implementation(DamageCauser); // IMPORTANT: Call base implementation to play common effects, etc.
+    Super::OnFullyDestroyed_Implementation(DamageCauser);
 
-    // UE_LOG(LogSolaraq, Log, TEXT("DestructibleAsteroid %s: OnFullyDestroyed_Implementation. Spawning loot if lucky."), *GetName());
-    UE_LOG(LogTemp, Log, TEXT("DestructibleAsteroid %s: OnFullyDestroyed_Implementation. Spawning loot if lucky."), *GetName());
+    // 1. Validation
+    if (!LootPickupClass || PossibleLootItems.Num() == 0) return;
 
+    // 2. Chance Roll
+    if (FMath::FRand() > LootDropChance) return;
 
-    // Asteroid-specific logic: Spawn loot
-    if (PossibleLootDrops.Num() > 0 && FMath::FRand() < LootDropChance)
+    // 3. Select Random Data Asset
+    const int32 Index = FMath::RandRange(0, PossibleLootItems.Num() - 1);
+    UItemDataAssetBase* SelectedItemData = PossibleLootItems[Index];
+
+    if (!SelectedItemData) return;
+
+    // 4. Deferred Spawn (Spawn -> Configure -> Finish)
+    FVector SpawnLoc = GetActorLocation();
+    FRotator SpawnRot = FMath::VRand().Rotation();
+    
+    AItemPickup* NewPickup = GetWorld()->SpawnActorDeferred<AItemPickup>(
+        LootPickupClass, 
+        FTransform(SpawnRot, SpawnLoc), 
+        this, 
+        GetInstigator(), 
+        ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn
+    );
+
+    if (NewPickup)
     {
-        const int32 LootIndex = FMath::RandRange(0, PossibleLootDrops.Num() - 1);
-        if (TSubclassOf<AActor> LootClass = PossibleLootDrops[LootIndex])
+        NewPickup->ItemData = SelectedItemData;
+        NewPickup->Quantity = FMath::RandRange(1, 3); // Or whatever logic you prefer
+
+        UGameplayStatics::FinishSpawningActor(NewPickup, FTransform(SpawnRot, SpawnLoc));
+
+        // Add small physics drift
+        UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(NewPickup->GetRootComponent());
+        if (RootPrim && RootPrim->IsSimulatingPhysics())
         {
-            FVector SpawnLocation = GetActorLocation(); // Or a location from the BreakEvent if preferred
-            FRotator SpawnRotation = FRotator::ZeroRotator; // Or random rotation
-
-            FActorSpawnParameters SpawnParams;
-            SpawnParams.Owner = this;
-            SpawnParams.Instigator = GetInstigator();
-            SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-            GetWorld()->SpawnActor<AActor>(LootClass, SpawnLocation, SpawnRotation, SpawnParams);
-            // UE_LOG(LogSolaraq, Log, TEXT("Asteroid %s dropped loot: %s"), *GetName(), *LootClass->GetName());
-            UE_LOG(LogTemp, Log, TEXT("Asteroid %s dropped loot: %s"), *GetName(), *LootClass->GetName());
+            RootPrim->AddImpulse(FMath::VRand() * 50.0f, NAME_None, true);
         }
     }
 }
-
-// Example of overriding piece broken if needed:
-/*
-void ADestructibleAsteroid::OnPieceBroken_Implementation(const FVector& PieceLocation, const FVector& PieceImpulseDir)
-{
-    Super::OnPieceBroken_Implementation(PieceLocation, PieceImpulseDir); // Call base for common piece break effects
-
-    // Asteroid-specific effect when a piece breaks off, e.g., spawn extra dust.
-    // UE_LOG(LogSolaraq, Verbose, TEXT("Asteroid %s: A piece broke off. Playing custom asteroid dust effect."), *GetName());
-}
-*/// Fill out your copyright notice in the Description page of Project Settings.
-
-
-#include "Environment/DestructibleAsteroid.h"
-
